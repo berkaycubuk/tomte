@@ -105,6 +105,11 @@ adding them doesn't break existing channels.
 An agent picks its channel with `tomte.SendTo(…)`; without one it uses
 `tomte.Stdout()`. v1 ships `stdout` and `telegram`.
 
+The Telegram channel turns the model's markdown into the HTML Telegram
+takes (and sends plain text when Telegram can't parse it), starts each
+message with the agent's name so several agents can share a bot and a
+chat, and turns link previews off.
+
 ### Deploying
 
 No tooling in v1. An agent is one binary and an env file: copy both to
