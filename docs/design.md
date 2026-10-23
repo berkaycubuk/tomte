@@ -59,7 +59,9 @@ func main() {
 		tomte.Tool("send_reminder", "Email a payment reminder", sendReminder),
 		tomte.Cron("0 9 * * 1-5", "Chase invoices overdue by 14 days or more"),
 		tomte.SendTo(telegram.New(os.Getenv("TELEGRAM_TOKEN"), "12345")),
-		tomte.MaxSteps(20), tomte.MaxCost(0.50, 5.00), // per run, per day
+		tomte.Price(0.60, 2.20),   // dollars per million tokens in, out
+		tomte.MaxCost(0.50, 5.00), // dollars per run, per day
+		tomte.MaxSteps(20),
 	).Run()
 }
 

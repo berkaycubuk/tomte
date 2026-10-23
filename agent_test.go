@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -43,7 +44,11 @@ func newFake(t *testing.T, replies ...string) (*fakeModel, Option) {
 	f := &fakeModel{replies: replies}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
-	return f, Model(srv.URL, "fake", "key")
+	logPath := filepath.Join(t.TempDir(), "runs.jsonl")
+	return f, func(a *Agent) {
+		Model(srv.URL, "fake", "key")(a)
+		Log(logPath)(a)
+	}
 }
 
 func callReply(id, name, args string) string {

@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -24,7 +26,16 @@ type Agent struct {
 	specs        []toolSpec // in declaration order, for the model
 	channel      Channel
 	maxSteps     int
+	price        *price
+	maxRun       float64 // dollars per run, 0 for no limit
+	maxDay       float64 // dollars per day, 0 for no limit
+	logPath      string
+	now          func() time.Time
 	errs         []error // mistakes in the options, reported by Do and Run
+
+	mu       sync.Mutex
+	logged   float64 // spent today by logged runs, read at each run's start
+	inflight float64 // spent by runs in this process that aren't logged yet
 }
 
 type Option func(*Agent)
@@ -37,12 +48,20 @@ func New(name string, opts ...Option) *Agent {
 		tools:    map[string]*tool{},
 		channel:  Stdout(),
 		maxSteps: 20,
+		logPath:  defaultLogPath(name),
+		now:      time.Now,
 	}
 	for _, o := range opts {
 		o(a)
 	}
 	if a.model == nil {
 		a.errs = append(a.errs, errors.New("no model: add tomte.Model(baseURL, name, key)"))
+	}
+	if a.maxRun < 0 || a.maxDay < 0 {
+		a.errs = append(a.errs, errors.New("MaxCost limits can't be negative"))
+	}
+	if (a.maxRun > 0 || a.maxDay > 0) && a.price == nil {
+		a.errs = append(a.errs, errors.New("MaxCost needs the model's price: add tomte.Price(in, out)"))
 	}
 	return a
 }
@@ -70,6 +89,18 @@ func MaxSteps(n int) Option {
 	return func(a *Agent) { a.maxSteps = n }
 }
 
+// Log sets the file the run log is appended to. It's <name>.jsonl in
+// $STATE_DIRECTORY (set by systemd's StateDirectory=) or else in the
+// working directory.
+func Log(path string) Option {
+	return func(a *Agent) { a.logPath = path }
+}
+
+func defaultLogPath(name string) string {
+	dir, _, _ := strings.Cut(os.Getenv("STATE_DIRECTORY"), ":")
+	return filepath.Join(dir, name+".jsonl")
+}
+
 // ErrStepLimit is returned when a run uses all its steps without replying.
 var ErrStepLimit = errors.New("step limit reached")
 
@@ -79,23 +110,46 @@ type Result struct {
 	Steps     int      // model calls
 	ToolCalls []string // tool names, in the order they were called
 	Usage     Usage
+	Cost      float64 // dollars, 0 without a Price
 }
 
-// Do runs the agent on one task and returns its reply. It doesn't send the
-// reply anywhere; Run does that.
+// Do runs the agent on one task, logs the run and returns its reply. It
+// doesn't send the reply anywhere; Run does that.
 func (a *Agent) Do(ctx context.Context, task string) (Result, error) {
-	var res Result
+	return a.run(ctx, "code", task)
+}
+
+func (a *Agent) run(ctx context.Context, trigger, task string) (Result, error) {
 	if err := errors.Join(a.errs...); err != nil {
-		return res, err
+		return Result{}, err
 	}
+	start := a.now()
+	var res Result
+	b, err := a.startBudget(start)
+	if err == nil {
+		res, err = a.loop(ctx, task, start, b)
+	}
+	// The log takes over counting the run's spending, in one step, so a
+	// run starting meanwhile counts it once.
+	a.mu.Lock()
+	a.logRun(start, trigger, task, res, err)
+	if b != nil {
+		a.inflight -= b.spent
+		a.logged += b.spent
+	}
+	a.mu.Unlock()
+	return res, err
+}
+
+func (a *Agent) loop(ctx context.Context, task string, start time.Time, b *budget) (res Result, err error) {
 	msgs := []message{
-		{Role: "system", Content: a.system(time.Now())},
+		{Role: "system", Content: a.system(start)},
 		{Role: "user", Content: task},
 	}
 	for res.Steps < a.maxSteps {
 		res.Steps++
 		reply, usage, err := a.model.chat(ctx, msgs, a.specs)
-		res.Usage.add(usage)
+		over := b.spend(&res, usage)
 		if err != nil {
 			return res, err
 		}
@@ -103,6 +157,11 @@ func (a *Agent) Do(ctx context.Context, task string) (Result, error) {
 		if len(reply.ToolCalls) == 0 {
 			res.Text = strings.TrimSpace(reply.Content)
 			return res, nil
+		}
+		// Over a limit, the run stops before doing more; a reply that
+		// came with the call that crossed it is still kept above.
+		if over != nil {
+			return res, over
 		}
 		for _, c := range reply.ToolCalls {
 			res.ToolCalls = append(res.ToolCalls, c.Function.Name)
@@ -146,7 +205,7 @@ func (a *Agent) main(ctx context.Context, args []string) int {
 		return 2
 	}
 	if len(args) >= 2 && args[0] == "run" {
-		return a.runOnce(ctx, strings.Join(args[1:], " "))
+		return a.runOnce(ctx, "cli", strings.Join(args[1:], " "))
 	}
 	fmt.Fprintf(os.Stderr, "usage: %s run <task>\n", a.name)
 	return 2
@@ -154,11 +213,11 @@ func (a *Agent) main(ctx context.Context, args []string) int {
 
 // runOnce does one task and sends the outcome, failures included, through
 // the channel: nobody may be watching the terminal.
-func (a *Agent) runOnce(ctx context.Context, task string) int {
-	res, err := a.Do(ctx, task)
+func (a *Agent) runOnce(ctx context.Context, trigger, task string) int {
+	res, err := a.run(ctx, trigger, task)
 	text, code := res.Text, 0
 	if err != nil {
-		text, code = fmt.Sprintf("%s failed after %d steps: %v", a.name, res.Steps, err), 1
+		text, code = a.failure(res, err), 1
 	}
 	if text == "" {
 		return code
@@ -171,4 +230,14 @@ func (a *Agent) runOnce(ctx context.Context, task string) int {
 		return 1
 	}
 	return code
+}
+
+func (a *Agent) failure(res Result, err error) string {
+	switch {
+	case res.Steps == 0:
+		return fmt.Sprintf("%s didn't run: %v", a.name, err)
+	case errors.Is(err, ErrCostLimit), errors.Is(err, ErrDailyLimit), errors.Is(err, ErrStepLimit):
+		return fmt.Sprintf("%s stopped after %d steps: %v", a.name, res.Steps, err)
+	}
+	return fmt.Sprintf("%s failed after %d steps: %v", a.name, res.Steps, err)
 }
