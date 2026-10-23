@@ -252,7 +252,14 @@ func (a *Agent) failure(res Result, err error) string {
 	case res.Steps == 0:
 		return fmt.Sprintf("%s didn't run: %v", a.name, err)
 	case errors.Is(err, ErrCostLimit), errors.Is(err, ErrDailyLimit), errors.Is(err, ErrStepLimit):
-		return fmt.Sprintf("%s stopped after %d steps: %v", a.name, res.Steps, err)
+		return fmt.Sprintf("%s stopped after %s: %v", a.name, steps(res.Steps), err)
 	}
-	return fmt.Sprintf("%s failed after %d steps: %v", a.name, res.Steps, err)
+	return fmt.Sprintf("%s failed after %s: %v", a.name, steps(res.Steps), err)
+}
+
+func steps(n int) string {
+	if n == 1 {
+		return "1 step"
+	}
+	return fmt.Sprintf("%d steps", n)
 }

@@ -1,0 +1,36 @@
+# One unit for every agent on the machine: tomte@<name> runs
+# /srv/tomte/<name>/<name> with the variables in /srv/tomte/<name>/env.
+#
+#   systemctl enable --now tomte@hn-digest
+#   journalctl -u tomte@hn-digest -f
+#
+# The run log is /var/lib/tomte/<name>/<name>.jsonl.
+
+[Unit]
+Description=Tomte agent %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/srv/tomte/%i/%i serve
+EnvironmentFile=/srv/tomte/%i/env
+Restart=on-failure
+RestartSec=10s
+# Runs in progress get 60 s to finish after a stop.
+TimeoutStopSec=90s
+
+# Its own throwaway user, a private state directory and nothing else.
+DynamicUser=yes
+StateDirectory=tomte/%i
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+
+# Keeps one agent from starving the others on a small machine.
+MemoryMax=128M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

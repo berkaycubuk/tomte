@@ -165,7 +165,7 @@ func TestRunOnceSendsFailures(t *testing.T) {
 	if code := a.main(context.Background(), []string{"run", "chase", "invoices"}); code != 1 {
 		t.Errorf("exit code = %d", code)
 	}
-	if !strings.HasPrefix(out.String(), "chaser failed after 1 steps: model: 400") {
+	if !strings.HasPrefix(out.String(), "chaser failed after 1 step: model: 400") {
 		t.Errorf("sent %q", out.String())
 	}
 }

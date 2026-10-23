@@ -113,7 +113,10 @@ chat, and turns link previews off.
 ### Deploying
 
 No tooling in v1. An agent is one binary and an env file: copy both to
-the machine and start it with the systemd unit template in the README.
+`/srv/tomte/<name>/` and start it with `deploy/tomte@.service`, one unit
+for every agent on the machine (`systemctl enable --now tomte@<name>`).
+Each runs as its own throwaway user with a private state directory for
+its run log, capped at 128 MB and half a CPU. The README has the steps.
 
 ## Later
 
