@@ -30,6 +30,7 @@ type Agent struct {
 	maxRun       float64 // dollars per run, 0 for no limit
 	maxDay       float64 // dollars per day, 0 for no limit
 	logPath      string
+	schedules    []*schedule
 	now          func() time.Time
 	errs         []error // mistakes in the options, reported by Do and Run
 
@@ -127,7 +128,7 @@ func (a *Agent) run(ctx context.Context, trigger, task string) (Result, error) {
 	var res Result
 	b, err := a.startBudget(start)
 	if err == nil {
-		res, err = a.loop(ctx, task, start, b)
+		res, err = a.loop(ctx, trigger, task, start, b)
 	}
 	// The log takes over counting the run's spending, in one step, so a
 	// run starting meanwhile counts it once.
@@ -141,9 +142,9 @@ func (a *Agent) run(ctx context.Context, trigger, task string) (Result, error) {
 	return res, err
 }
 
-func (a *Agent) loop(ctx context.Context, task string, start time.Time, b *budget) (res Result, err error) {
+func (a *Agent) loop(ctx context.Context, trigger, task string, start time.Time, b *budget) (res Result, err error) {
 	msgs := []message{
-		{Role: "system", Content: a.system(start)},
+		{Role: "system", Content: a.system(trigger, start)},
 		{Role: "user", Content: task},
 	}
 	for res.Steps < a.maxSteps {
@@ -171,13 +172,20 @@ func (a *Agent) loop(ctx context.Context, task string, start time.Time, b *budge
 	return res, ErrStepLimit
 }
 
-func (a *Agent) system(now time.Time) string {
+// nothing is the reply of a scheduled run with nothing worth sending.
+const nothing = "NOTHING"
+
+func (a *Agent) system(trigger string, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are %s, an agent that does one job.\n", a.name)
 	if a.instructions != "" {
 		b.WriteString("\n" + a.instructions + "\n")
 	}
 	fmt.Fprintf(&b, "\nThe time is %s.", now.Format("Monday, 2 January 2006, 15:04 MST"))
+	if trigger == "cron" {
+		b.WriteString(" This run was started by a schedule, and nobody is waiting for it. " +
+			"Your reply is sent to the people you work for; if there's nothing worth telling them, reply with exactly " + nothing + ".")
+	}
 	return b.String()
 }
 
@@ -204,10 +212,17 @@ func (a *Agent) main(ctx context.Context, args []string) int {
 		log.Printf("%s: %v", a.name, err)
 		return 2
 	}
-	if len(args) >= 2 && args[0] == "run" {
+	switch {
+	case len(args) >= 2 && args[0] == "run":
 		return a.runOnce(ctx, "cli", strings.Join(args[1:], " "))
+	case len(args) == 0 || len(args) == 1 && args[0] == "serve":
+		if err := a.serve(ctx); err != nil {
+			log.Printf("%s: %v", a.name, err)
+			return 2
+		}
+		return 0
 	}
-	fmt.Fprintf(os.Stderr, "usage: %s run <task>\n", a.name)
+	fmt.Fprintf(os.Stderr, "usage: %s [serve]     run on the schedules\n       %s run <task>  do one task now\n", a.name, a.name)
 	return 2
 }
 
@@ -219,7 +234,7 @@ func (a *Agent) runOnce(ctx context.Context, trigger, task string) int {
 	if err != nil {
 		text, code = a.failure(res, err), 1
 	}
-	if text == "" {
+	if text == "" || text == nothing {
 		return code
 	}
 	// A run stopped by a signal still says so.

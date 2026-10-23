@@ -19,6 +19,7 @@ import (
 type fakeModel struct {
 	mu       sync.Mutex
 	replies  []string // assistant messages as JSON, one per request
+	always   string   // the reply once replies run out, if set
 	requests []chatRequest
 }
 
@@ -31,6 +32,9 @@ func (f *fakeModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.requests = append(f.requests, req)
+	if len(f.replies) == 0 && f.always != "" {
+		f.replies = []string{f.always}
+	}
 	if len(f.replies) == 0 {
 		http.Error(w, `{"error":{"message":"no more replies"}}`, 400)
 		return

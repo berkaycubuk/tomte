@@ -79,7 +79,7 @@ func findOverdue(ctx context.Context, in overdueArgs) ([]Invoice, error) { … }
 | Loop | Builds the prompt, calls the model, runs the tool calls, repeats until the model replies |
 | Model | One OpenAI-compatible chat client (OpenRouter, z.ai, Groq, Ollama…); counts tokens from each response and prices them |
 | Tools | `func(context.Context, In) (Out, error)`; the JSON schema comes from `In`, `Out` is marshalled to JSON for the model; a tool's error goes back to the model as its result |
-| Triggers | `Cron` (a five-field schedule, sleeping until the next time) and the command line: `./invoice-chaser run "…"` |
+| Triggers | `Cron` (five fields, a shortcut like `@daily`, or `@every 30m`) while serving: `./invoice-chaser` or `./invoice-chaser serve` sleeps until a schedule is due; and the command line: `./invoice-chaser run "…"`. A scheduled run that has nothing to say replies `NOTHING` and sends nothing |
 | Channel | Where the result goes, behind an interface; v1 ships one channel |
 | Limits | Steps per run, dollars per run and per day; at a limit the run stops and says so through the channel |
 | Run log | One JSON line per run in a file: when, trigger, tools called, steps, tokens, cost, result or error |
