@@ -85,9 +85,13 @@ func deploy(args []string) error {
 		}
 	}
 	fmt.Fprintf(os.Stderr, "starting %s on %s\n", in.Name, b)
-	if err := b.helper(nil, os.Stdout, "activate", upload, in.Name); err != nil {
+	out.Reset()
+	if err := b.helper(nil, &out, "activate", upload, in.Name); err != nil {
 		return err
 	}
+	// Described again with its env file, the agent's next run is in its
+	// own time zone.
+	json.Unmarshal(out.Bytes(), &in)
 	fmt.Printf("%s is running on %s; next run %s\n", in.Name, b, in.next().Format("Mon 2 Jan 15:04 MST"))
 	return nil
 }

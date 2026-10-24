@@ -85,7 +85,7 @@ func TestHelperDeploys(t *testing.T) {
 	if out, err := b.run("KEY=1\n", "env", "digest"); err != nil {
 		t.Fatalf("env: %v\n%s", err, out)
 	}
-	if out, err := b.run("", "activate", "abc123", "digest"); err != nil {
+	if out, err := b.run("", "activate", "abc123", "digest"); err != nil || !strings.Contains(out, `"name":"digest"`) {
 		t.Fatalf("activate: %v\n%s", err, out)
 	}
 	d := filepath.Join(b.root, "digest")

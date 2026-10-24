@@ -6,7 +6,8 @@
 #
 #   tomte-helper stage <id>          an agent binary on stdin; prints its info
 #   tomte-helper env <name>          the agent's env file on stdin
-#   tomte-helper activate <id> <name> put the staged binary in place and (re)start it
+#   tomte-helper activate <id> <name> put the staged binary in place, (re)start it
+#                                    and print its info, with its env file
 #   tomte-helper ls                  every agent: its unit, info and today's runs
 set -eu
 umask 022
@@ -95,6 +96,8 @@ activate() {
 		journalctl -u "$unit" -n 20 --no-pager -o cat >&2 || true
 		exit 1
 	fi
+	# Its schedules follow the TZ in the env file, which stage couldn't use.
+	describe "$d/$2" "$d/env" || true
 }
 
 list() {
