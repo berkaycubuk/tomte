@@ -4,11 +4,16 @@
 # password, and nothing else, so it takes only agent names and touches
 # only tomte@<name>, /srv/tomte/<name> and /var/lib/tomte/<name>.
 #
-#   tomte-helper stage <id>          an agent binary on stdin; prints its info
-#   tomte-helper env <name>          the agent's env file on stdin
+#   tomte-helper stage <id>           an agent binary on stdin; prints its info
+#   tomte-helper env <name>           the agent's env file on stdin
+#   tomte-helper getenv <name>        print the agent's env file
 #   tomte-helper activate <id> <name> put the staged binary in place, (re)start it
-#                                    and print its info, with its env file
-#   tomte-helper ls                  every agent: its unit, info and today's runs
+#                                     and print its info, with its env file
+#   tomte-helper restart <name>       restart the agent
+#   tomte-helper ls                   every agent: its unit, info and today's runs
+#   tomte-helper logs <name> <lines> [follow]  the agent's journal
+#   tomte-helper runs <name> <count>  the last lines of its run log
+#   tomte-helper run <name> <task>    do one task now, as the agent
 set -eu
 umask 022
 
@@ -30,6 +35,17 @@ valid_name() {
 
 check_name() {
 	valid_name "$1" || die "bad agent name \"$1\": use up to 25 lowercase letters, digits and dashes"
+}
+
+check_agent() {
+	check_name "$1"
+	[ -x "$root/$1/$1" ] || die "there's no agent named $1 here"
+}
+
+check_count() {
+	case $1 in
+	'' | *[!0-9]*) die "bad count \"$1\"" ;;
+	esac
 }
 
 check_id() {
@@ -88,16 +104,57 @@ activate() {
 	fi
 	mv "$f" "$d/$2"
 	systemctl enable --quiet "$unit"
-	systemctl restart "$unit"
-	# An agent that can't start fails within a second or two.
-	sleep 3
-	if ! systemctl is-active --quiet "$unit"; then
-		echo "$unit isn't running:" >&2
-		journalctl -u "$unit" -n 20 --no-pager -o cat >&2 || true
-		exit 1
-	fi
+	restart "$2"
 	# Its schedules follow the TZ in the env file, which stage couldn't use.
 	describe "$d/$2" "$d/env" || true
+}
+
+restart() {
+	check_agent "$1"
+	systemctl restart "tomte@$1"
+	# An agent that can't start fails within a second or two.
+	sleep 3
+	if ! systemctl is-active --quiet "tomte@$1"; then
+		echo "tomte@$1 isn't running:" >&2
+		journalctl -u "tomte@$1" -n 20 --no-pager -o cat >&2 || true
+		exit 1
+	fi
+}
+
+get_env() {
+	check_agent "$1"
+	cat "$root/$1/env"
+}
+
+logs() {
+	check_name "$1"
+	check_count "$2"
+	if [ "${3-}" = follow ]; then
+		exec journalctl -u "tomte@$1" -n "$2" -o short-iso -f
+	fi
+	exec journalctl -u "tomte@$1" -n "$2" -o short-iso --no-pager
+}
+
+runs() {
+	check_name "$1"
+	check_count "$2"
+	log=$state/$1/$1.jsonl
+	if [ -r "$log" ]; then
+		tail -n "$2" "$log"
+	fi
+}
+
+# run does one task the way the service would: as the agent's own user,
+# who owns its state directory, and inside the same limits as the unit.
+run() {
+	check_agent "$1"
+	[ -n "$2" ] || die "no task"
+	exec systemd-run --quiet --wait --pipe --collect \
+		-p DynamicUser=yes -p User="tomte-$1" -p StateDirectory="tomte/$1" \
+		-p EnvironmentFile="$root/$1/env" -p Slice=tomte.slice \
+		-p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p PrivateDevices=yes \
+		-p NoNewPrivileges=yes -p MemoryMax=128M -p CPUQuota=50% \
+		"$root/$1/$1" run "$2" </dev/null
 }
 
 list() {
@@ -124,7 +181,12 @@ list() {
 case ${1-} in
 stage) [ $# -eq 2 ] || die "usage: stage <id>" && stage "$2" ;;
 env) [ $# -eq 2 ] || die "usage: env <name>" && set_env "$2" ;;
+getenv) [ $# -eq 2 ] || die "usage: getenv <name>" && get_env "$2" ;;
 activate) [ $# -eq 3 ] || die "usage: activate <id> <name>" && activate "$2" "$3" ;;
+restart) [ $# -eq 2 ] || die "usage: restart <name>" && restart "$2" ;;
 ls) [ $# -eq 1 ] || die "usage: ls" && list ;;
-*) die "usage: tomte-helper stage <id> | env <name> | activate <id> <name> | ls" ;;
+logs) [ $# -eq 3 ] || [ $# -eq 4 ] || die "usage: logs <name> <lines> [follow]" && logs "$2" "$3" "${4-}" ;;
+runs) [ $# -eq 3 ] || die "usage: runs <name> <count>" && runs "$2" "$3" ;;
+run) [ $# -eq 3 ] || die "usage: run <name> <task>" && run "$2" "$3" ;;
+*) die "unknown command \"${1-}\"; this helper may be older than the tomte command" ;;
 esac

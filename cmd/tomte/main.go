@@ -18,9 +18,14 @@ import (
 )
 
 const usage = `usage:
-  tomte setup [-memory 1G] [-cpu 100%] <box>   set a machine up for agents
-  tomte deploy [-env file] <box> <package>     build an agent and (re)start it there
-  tomte ls <box>                               the agents there and how they're doing
+  tomte setup [-memory 1G] [-cpu 100%] <box>     set a machine up for agents
+  tomte deploy [-env file] <box> <package>       build an agent and (re)start it there
+  tomte ls <box>                                 the agents there and how they're doing
+  tomte env [-values | -edit | -set file] <box> <agent>
+                                                 show or change an agent's environment
+  tomte logs [-f] [-n 50] <box> <agent>          an agent's log
+  tomte runs [-n 10] [-json] <box> <agent>       an agent's last runs
+  tomte run <box> <agent> <task>                 do one task now and wait for it
 `
 
 func main() {
@@ -32,6 +37,10 @@ func main() {
 		"setup":  setup,
 		"deploy": deploy,
 		"ls":     ls,
+		"env":    env,
+		"logs":   logs,
+		"runs":   runs,
+		"run":    run,
 	}
 	cmd, ok := commands[os.Args[1]]
 	if !ok {
@@ -39,25 +48,37 @@ func main() {
 		os.Exit(2)
 	}
 	if err := cmd(os.Args[2:]); err != nil {
-		if !errors.Is(err, flag.ErrHelp) {
+		if !errors.Is(err, flag.ErrHelp) && !errors.Is(err, errShown) {
 			fmt.Fprintf(os.Stderr, "tomte %s: %v\n", os.Args[1], err)
 		}
 		os.Exit(1)
 	}
 }
 
-// parse parses a command's flags and checks it got n arguments.
-func parse(fs *flag.FlagSet, args []string, n int, names string) error {
+// parse parses a command's flags, which may come before, between or
+// after its arguments, and returns the arguments: n of them, or with
+// rest, at least n, where everything after the nth is an argument even
+// if it looks like a flag.
+func parse(fs *flag.FlagSet, args []string, n int, rest bool, names string) ([]string, error) {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: tomte %s [flags] %s\n", fs.Name(), names)
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
-		return err
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		args = fs.Args()
+		if len(args) == 0 || rest && len(pos) == n {
+			pos = append(pos, args...)
+			break
+		}
+		pos, args = append(pos, args[0]), args[1:]
 	}
-	if fs.NArg() != n {
+	if len(pos) < n || !rest && len(pos) > n {
 		fs.Usage()
-		return flag.ErrHelp
+		return nil, flag.ErrHelp
 	}
-	return nil
+	return pos, nil
 }

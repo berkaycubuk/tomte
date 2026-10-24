@@ -32,7 +32,8 @@ func setup(args []string) error {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	memory := fs.String("memory", "1G", "memory all agents together may use")
 	cpu := fs.String("cpu", "100%", "CPU all agents together may use; 100% is one core")
-	if err := parse(fs, args, 1, "<box>"); err != nil {
+	pos, err := parse(fs, args, 1, false, "<box>")
+	if err != nil {
 		return err
 	}
 	if !memoryRe.MatchString(*memory) {
@@ -49,10 +50,10 @@ func setup(args []string) error {
 	// sudo to ask for a password.
 	b64 := base64.StdEncoding.EncodeToString([]byte(script))
 	remote := `s=$(echo ` + b64 + ` | base64 -d) && if [ "$(id -u)" = 0 ]; then sh -c "$s"; else sudo sh -c "$s"; fi`
-	cmd := exec.Command("ssh", "-t", fs.Arg(0), remote)
+	cmd := exec.Command("ssh", "-t", pos[0], remote)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("on %s: %w", fs.Arg(0), err)
+		return fmt.Errorf("on %s: %w", pos[0], err)
 	}
 	return nil
 }

@@ -136,14 +136,17 @@ reads what's in `/srv/tomte`, and there's no inventory to keep in step.
   the unit, the directory and the run log can't disagree.
 - `tomte ls box` shows every agent's state, memory, next and last run,
   and what it spent today.
+- `tomte logs`, `runs`, `run` and `env` read an agent's journal and run
+  log, do one task now as the agent's own user, and show or change its
+  env file, restarting it after.
 
 ## Later
 
 Added when an agent needs them, in roughly this order: receiving messages
 over a channel, approvals before risky tools, webhooks, model fallbacks,
-resuming a run after a restart, more `tomte` commands (`logs`, `runs`,
-`run`, `env`, `rollback`, `rm`), `tomte new`, MCP tools, test helpers,
-and several agents in one process to share memory on very small machines.
+resuming a run after a restart, `tomte rollback` and `tomte rm`,
+`tomte new`, MCP tools, test helpers, and several agents in one process
+to share memory on very small machines.
 
 ## First version
 

@@ -29,14 +29,16 @@ func newFakeBox(t *testing.T) *fakeBox {
 
 	bin := filepath.Join(dir, "bin")
 	stubs := map[string]string{
-		// systemd-run … <binary> info: run the binary.
-		"systemd-run": `eval "b=\${$(($# - 1))}"; exec "$b" info`,
+		// systemd-run [options] <command>: note the options, run the command.
+		"systemd-run": `echo "systemd-run $*" >>"$CALLS"
+while [ $# -gt 0 ]; do case $1 in /*) break ;; esac; shift; done
+exec "$@"`,
 		"systemctl": `echo "systemctl $*" >>"$CALLS"
 case $1 in
 show) printf 'ActiveState=active\nSubState=running\nMemoryCurrent=10485760\nActiveEnterTimestamp=@1000\n' ;;
 is-active) [ ! -e "$DIR/failing" ] ;;
 esac`,
-		"journalctl": `echo "it broke"`,
+		"journalctl": `echo "journalctl $*" >>"$CALLS"; echo "it broke"`,
 		"sleep":      `:`,
 		"date":       `case $1 in +%s) echo 4600 ;; +%F) echo 2026-10-24 ;; esac`,
 	}
@@ -71,9 +73,24 @@ func (b *fakeBox) calls() string {
 	return string(c)
 }
 
-// agent is a stand-in agent binary that describes itself as name.
+// agent is a stand-in agent binary that describes itself as name, and
+// says what it was asked to do otherwise.
 func agent(name string) string {
-	return "#!/bin/sh\necho '{\"name\":\"" + name + "\",\"schedules\":[{\"spec\":\"@daily\",\"next\":\"2026-10-25T00:00:00Z\"}]}'\n"
+	return "#!/bin/sh\n[ \"$1\" = run ] && { echo \"did: $2\"; exit 0; }\n" +
+		"echo '{\"name\":\"" + name + "\",\"schedules\":[{\"spec\":\"@daily\",\"next\":\"2026-10-25T00:00:00Z\"}]}'\n"
+}
+
+// deployed is a fake box with one agent on it.
+func deployed(t *testing.T, name string) *fakeBox {
+	b := newFakeBox(t)
+	if out, err := b.run(agent(name), "stage", "abc"); err != nil {
+		t.Fatalf("stage: %v\n%s", err, out)
+	}
+	if out, err := b.run("", "activate", "abc", name); err != nil {
+		t.Fatalf("activate: %v\n%s", err, out)
+	}
+	os.Remove(filepath.Join(b.dir, "calls"))
+	return b
 }
 
 func TestHelperDeploys(t *testing.T) {
@@ -144,6 +161,13 @@ func TestHelperRefusesBadNames(t *testing.T) {
 		{"activate", "../x", "digest"},
 		{"stage", "abc/../../x"},
 		{"env", "digest", "extra"},
+		{"getenv", "../digest"},
+		{"restart", "-digest"},
+		{"logs", "digest", "5; rm"},
+		{"logs", "digest", "-1"},
+		{"runs", "a b", "5"},
+		{"runs", "digest", ""},
+		{"run", "../x", "task"},
 		{"rm", "digest"},
 	}
 	for _, args := range bad {
@@ -188,5 +212,70 @@ func TestHelperLists(t *testing.T) {
 	}
 	if m := a.memory(); m != "10.0M" {
 		t.Errorf("memory = %q", m)
+	}
+}
+
+func TestHelperEnv(t *testing.T) {
+	b := deployed(t, "digest")
+	if out, err := b.run("A=1\nB=2\n", "env", "digest"); err != nil {
+		t.Fatalf("env: %v\n%s", err, out)
+	}
+	if out, err := b.run("", "getenv", "digest"); err != nil || out != "A=1\nB=2\n" {
+		t.Errorf("getenv: %v %q", err, out)
+	}
+	if out, err := b.run("", "restart", "digest"); err != nil || !strings.Contains(b.calls(), "systemctl restart tomte@digest") {
+		t.Errorf("restart: %v\n%s\n%s", err, out, b.calls())
+	}
+	if out, err := b.run("", "getenv", "nobody"); err == nil || !strings.Contains(out, "no agent named nobody") {
+		t.Errorf("getenv of a missing agent: %v %q", err, out)
+	}
+}
+
+func TestHelperLogsAndRuns(t *testing.T) {
+	b := deployed(t, "digest")
+	b.run("", "logs", "digest", "20")
+	b.run("", "logs", "digest", "5", "follow")
+	c := b.calls()
+	if !strings.Contains(c, "journalctl -u tomte@digest -n 20 -o short-iso --no-pager") ||
+		!strings.Contains(c, "journalctl -u tomte@digest -n 5 -o short-iso -f") {
+		t.Errorf("calls:\n%s", c)
+	}
+
+	if out, err := b.run("", "runs", "digest", "5"); err != nil || out != "" {
+		t.Errorf("runs before any: %v %q", err, out)
+	}
+	var log strings.Builder
+	for i := range 5 {
+		log.WriteString(`{"start":"2026-10-24T08:00:0` + string(rune('0'+i)) + `Z"}` + "\n")
+	}
+	b.write(filepath.Join(b.state, "digest", "digest.jsonl"), log.String(), 0o600)
+	if out, _ := b.run("", "runs", "digest", "2"); strings.Count(out, "\n") != 2 || !strings.Contains(out, "08:00:04") {
+		t.Errorf("runs: %q", out)
+	}
+}
+
+func TestHelperRun(t *testing.T) {
+	b := deployed(t, "digest")
+	out, err := b.run("", "run", "digest", "send it; now")
+	if err != nil || out != "did: send it; now\n" {
+		t.Fatalf("run: %v %q", err, out)
+	}
+	// As the agent's own user, so its run log stays its own, and within
+	// the unit's limits.
+	c := b.calls()
+	for _, want := range []string{"User=tomte-digest", "StateDirectory=tomte/digest", "Slice=tomte.slice", "MemoryMax=128M", "ProtectSystem=strict"} {
+		if !strings.Contains(c, want) {
+			t.Errorf("run without %s:\n%s", want, c)
+		}
+	}
+	if out, err := b.run("", "run", "digest", ""); err == nil {
+		t.Errorf("an empty task ran: %q", out)
+	}
+}
+
+func TestHelperSaysWhenItsOlder(t *testing.T) {
+	b := newFakeBox(t)
+	if out, _ := b.run("", "frobnicate", "digest"); !strings.Contains(out, "tomte-helper: unknown command") {
+		t.Errorf("out = %q", out)
 	}
 }

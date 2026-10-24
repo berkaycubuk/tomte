@@ -150,14 +150,19 @@ TELEGRAM_CHAT=…
 TZ=Europe/Istanbul
 ```
 
-Runs in progress get 60 s to finish when an agent restarts. Logs are in
-`journalctl -u tomte@hn-digest`. To try a deployed agent by hand:
+Runs in progress get 60 s to finish when an agent restarts.
+
+**Day to day.** Flags go anywhere on the line.
 
 ```sh
-sudo systemd-run --pty -p DynamicUser=yes -p User=tomte-hn-digest -p StateDirectory=tomte/hn-digest \
-  -p EnvironmentFile=/srv/tomte/hn-digest/env /srv/tomte/hn-digest/hn-digest run "send the digest"
+tomte logs gandalf hn-digest            # the last 50 lines of its log; -f to follow, -n for more
+tomte runs gandalf hn-digest            # its last 10 runs: when, trigger, cost, outcome; -json for jq
+tomte run gandalf hn-digest "send the digest"   # one task now, waiting for it
+tomte env gandalf hn-digest             # its variables, values hidden; -values to show them
+tomte env -edit gandalf hn-digest       # change them in $EDITOR, then restart it
+tomte env -set hn-digest.env gandalf hn-digest  # or replace them from a file
 ```
 
-It must run as the agent's user, `tomte-<name>`: systemd gives the state
-directory to whichever user starts with it, and the agent would lose its
-run log to any other.
+`tomte run` runs the agent as the service would, as its own user,
+`tomte-<name>`, and inside the same limits. Its reply goes through its
+channel, and the run is in the run log and `tomte runs` like any other.

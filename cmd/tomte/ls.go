@@ -29,10 +29,15 @@ type agentInfo struct {
 
 // runRecord is a line of an agent's run log (runlog.go in tomte).
 type runRecord struct {
-	Start  time.Time `json:"start"`
-	Cost   float64   `json:"cost"`
-	Result string    `json:"result"`
-	Error  string    `json:"error"`
+	Start   time.Time `json:"start"`
+	Took    string    `json:"took"`
+	Trigger string    `json:"trigger"`
+	Task    string    `json:"task"`
+	Steps   int       `json:"steps"`
+	Tools   []string  `json:"tools"`
+	Cost    float64   `json:"cost"`
+	Result  string    `json:"result"`
+	Error   string    `json:"error"`
 }
 
 // agentStatus is one agent as `tomte-helper ls` describes it.
@@ -46,11 +51,12 @@ type agentStatus struct {
 
 func ls(args []string) error {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
-	if err := parse(fs, args, 1, "<box>"); err != nil {
+	pos, err := parse(fs, args, 1, false, "<box>")
+	if err != nil {
 		return err
 	}
 	var out bytes.Buffer
-	if err := box(fs.Arg(0)).helper(nil, &out, "ls"); err != nil {
+	if err := box(pos[0]).helper(nil, &out, "ls"); err != nil {
 		return err
 	}
 	now, agents, err := parseList(&out)
@@ -58,7 +64,7 @@ func ls(args []string) error {
 		return err
 	}
 	if len(agents) == 0 {
-		fmt.Printf("no agents on %s yet; add one with `tomte deploy %s <package>`\n", fs.Arg(0), fs.Arg(0))
+		fmt.Printf("no agents on %s yet; add one with `tomte deploy %s <package>`\n", pos[0], pos[0])
 		return nil
 	}
 	printList(os.Stdout, now, agents)

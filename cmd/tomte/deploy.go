@@ -24,13 +24,13 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,24}$`)
 func deploy(args []string) error {
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	envFile := fs.String("env", "", "the agent's environment `file`, replacing the one on the box")
-	if err := parse(fs, args, 2, "<box> <package>"); err != nil {
+	pos, err := parse(fs, args, 2, false, "<box> <package>")
+	if err != nil {
 		return err
 	}
-	b, pkg := box(fs.Arg(0)), fs.Arg(1)
+	b, pkg := box(pos[0]), pos[1]
 	var env []byte
 	if *envFile != "" {
-		var err error
 		if env, err = os.ReadFile(*envFile); err != nil {
 			return err
 		}

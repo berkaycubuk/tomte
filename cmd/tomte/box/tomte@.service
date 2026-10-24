@@ -20,6 +20,8 @@ RestartSec=10s
 TimeoutStopSec=90s
 
 # Its own throwaway user, a private state directory and nothing else.
+# `tomte-helper run` starts one-off runs with the same settings; change
+# them there too.
 # Without User=, every agent would get the same user, named "tomte".
 DynamicUser=yes
 User=tomte-%i
