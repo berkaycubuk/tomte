@@ -16,9 +16,10 @@ import (
 	"time"
 )
 
-// nameRe is the agent names tomte-helper takes: they become a unit name
-// and directory names on the box.
-var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+// nameRe is the agent names tomte-helper takes: they become a unit name,
+// directory names and a user name, tomte-<name>, which old tools want
+// within 31 characters.
+var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,24}$`)
 
 func deploy(args []string) error {
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
@@ -99,7 +100,7 @@ func deploy(args []string) error {
 // check refuses an agent that couldn't serve.
 func (in agentInfo) check() error {
 	if !nameRe.MatchString(in.Name) {
-		return fmt.Errorf("agent name %q: deployed agents need a name of up to 64 lowercase letters, digits and dashes", in.Name)
+		return fmt.Errorf("agent name %q: deployed agents need a name of up to 25 lowercase letters, digits and dashes", in.Name)
 	}
 	if len(in.Errors) > 0 {
 		return fmt.Errorf("%s has mistakes in its options:\n  %s", in.Name, strings.Join(in.Errors, "\n  "))

@@ -154,6 +154,10 @@ Runs in progress get 60 s to finish when an agent restarts. Logs are in
 `journalctl -u tomte@hn-digest`. To try a deployed agent by hand:
 
 ```sh
-sudo systemd-run --pty -p DynamicUser=yes -p StateDirectory=tomte/hn-digest \
+sudo systemd-run --pty -p DynamicUser=yes -p User=tomte-hn-digest -p StateDirectory=tomte/hn-digest \
   -p EnvironmentFile=/srv/tomte/hn-digest/env /srv/tomte/hn-digest/hn-digest run "send the digest"
 ```
+
+It must run as the agent's user, `tomte-<name>`: systemd gives the state
+directory to whichever user starts with it, and the agent would lose its
+run log to any other.

@@ -139,7 +139,7 @@ func TestHelperRefusesBadNames(t *testing.T) {
 		{"env", "-rf"},
 		{"env", "Digest"},
 		{"env", ""},
-		{"env", strings.Repeat("a", 65)},
+		{"env", strings.Repeat("a", 26)},
 		{"activate", "abc", "a/b"},
 		{"activate", "../x", "digest"},
 		{"stage", "abc/../../x"},

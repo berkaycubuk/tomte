@@ -25,11 +25,11 @@ valid_name() {
 	case $1 in
 	'' | -* | *[!a-z0-9-]*) return 1 ;;
 	esac
-	[ ${#1} -le 64 ]
+	[ ${#1} -le 25 ]
 }
 
 check_name() {
-	valid_name "$1" || die "bad agent name \"$1\": use up to 64 lowercase letters, digits and dashes"
+	valid_name "$1" || die "bad agent name \"$1\": use up to 25 lowercase letters, digits and dashes"
 }
 
 check_id() {

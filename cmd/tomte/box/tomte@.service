@@ -20,7 +20,9 @@ RestartSec=10s
 TimeoutStopSec=90s
 
 # Its own throwaway user, a private state directory and nothing else.
+# Without User=, every agent would get the same user, named "tomte".
 DynamicUser=yes
+User=tomte-%i
 StateDirectory=tomte/%i
 ProtectSystem=strict
 ProtectHome=yes
