@@ -147,8 +147,8 @@ reads what's in `/srv/tomte`, and there's no inventory to keep in step.
 
 Added when an agent needs them, in roughly this order: receiving messages
 over a channel, approvals before risky tools, webhooks, model fallbacks,
-resuming a run after a restart, `tomte new`, MCP tools, test helpers, and several agents in one process
-to share memory on very small machines.
+resuming a run after a restart, `tomte new`, MCP tools, test helpers,
+and several agents in one process to share memory on very small machines.
 
 ## First version
 
