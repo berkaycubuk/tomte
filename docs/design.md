@@ -139,13 +139,15 @@ reads what's in `/srv/tomte`, and there's no inventory to keep in step.
 - `tomte logs`, `runs`, `run` and `env` read an agent's journal and run
   log, do one task now as the agent's own user, and show or change its
   env file, restarting it after.
+- `tomte rollback` swaps the binary with `<name>.prev`, so running it
+  twice undoes it; `tomte rm` stops an agent and deletes it, keeping its
+  run log unless `-purge`.
 
 ## Later
 
 Added when an agent needs them, in roughly this order: receiving messages
 over a channel, approvals before risky tools, webhooks, model fallbacks,
-resuming a run after a restart, `tomte rollback` and `tomte rm`,
-`tomte new`, MCP tools, test helpers, and several agents in one process
+resuming a run after a restart, `tomte new`, MCP tools, test helpers, and several agents in one process
 to share memory on very small machines.
 
 ## First version

@@ -2,7 +2,8 @@
 # tomte-helper is what the tomte command does on this machine, as root.
 # `tomte setup` installs it and lets the ssh user run it with sudo and no
 # password, and nothing else, so it takes only agent names and touches
-# only tomte@<name>, /srv/tomte/<name> and /var/lib/tomte/<name>.
+# only tomte@<name>, /srv/tomte/<name> and /var/lib/tomte/<name> (which
+# systemd keeps in /var/lib/private/tomte/<name>).
 #
 #   tomte-helper stage <id>           an agent binary on stdin; prints its info
 #   tomte-helper env <name>           the agent's env file on stdin
@@ -14,11 +15,15 @@
 #   tomte-helper logs <name> <lines> [follow]  the agent's journal
 #   tomte-helper runs <name> <count>  the last lines of its run log
 #   tomte-helper run <name> <task>    do one task now, as the agent
+#   tomte-helper rollback <name>      swap the binary with the one before, restart
+#                                     and print its info
+#   tomte-helper rm <name> [purge]    stop and remove the agent; purge: its run log too
 set -eu
 umask 022
 
 root=/srv/tomte
 state=/var/lib/tomte
+private=/var/lib/private/tomte
 incoming=$root/.incoming
 
 die() {
@@ -157,6 +162,30 @@ run() {
 		"$root/$1/$1" run "$2" </dev/null
 }
 
+# rollback swaps rather than overwrites, so a second rollback goes back
+# to where the first started.
+rollback() {
+	check_agent "$1"
+	d=$root/$1
+	[ -x "$d/$1.prev" ] || die "$1 has no previous binary to go back to"
+	mv "$d/$1" "$d/$1.next"
+	mv "$d/$1.prev" "$d/$1"
+	mv "$d/$1.next" "$d/$1.prev"
+	restart "$1"
+	describe "$d/$1" "$d/env" || true
+}
+
+remove() {
+	check_name "$1"
+	[ -d "$root/$1" ] || die "there's no agent named $1 here"
+	systemctl disable --now --quiet "tomte@$1" || true
+	systemctl reset-failed "tomte@$1" 2>/dev/null || true
+	rm -rf "${root:?}/$1"
+	if [ "${2-}" = purge ]; then
+		rm -rf "${private:?}/$1" "${state:?}/$1"
+	fi
+}
+
 list() {
 	echo "now $(date +%s)"
 	today=$(date +%F)
@@ -188,5 +217,7 @@ ls) [ $# -eq 1 ] || die "usage: ls" && list ;;
 logs) [ $# -eq 3 ] || [ $# -eq 4 ] || die "usage: logs <name> <lines> [follow]" && logs "$2" "$3" "${4-}" ;;
 runs) [ $# -eq 3 ] || die "usage: runs <name> <count>" && runs "$2" "$3" ;;
 run) [ $# -eq 3 ] || die "usage: run <name> <task>" && run "$2" "$3" ;;
+rollback) [ $# -eq 2 ] || die "usage: rollback <name>" && rollback "$2" ;;
+rm) [ $# -eq 2 ] || [ $# -eq 3 ] || die "usage: rm <name> [purge]" && remove "$2" "${3-}" ;;
 *) die "unknown command \"${1-}\"; this helper may be older than the tomte command" ;;
 esac

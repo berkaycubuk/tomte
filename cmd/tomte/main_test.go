@@ -150,3 +150,16 @@ func TestPrintRuns(t *testing.T) {
 		t.Errorf("a long outcome wasn't cut:\n%s", out.String())
 	}
 }
+
+func TestIsTerminal(t *testing.T) {
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	f, _ := os.CreateTemp(t.TempDir(), "")
+	defer f.Close()
+	if isTerminal(null) || isTerminal(f) {
+		t.Error("/dev/null or a file passed for a terminal")
+	}
+}

@@ -13,16 +13,18 @@ import (
 type fakeBox struct {
 	t                *testing.T
 	dir, root, state string
+	private          string
 	helper           string
 	path             string
 }
 
 func newFakeBox(t *testing.T) *fakeBox {
 	dir := t.TempDir()
-	b := &fakeBox{t: t, dir: dir, root: filepath.Join(dir, "srv"), state: filepath.Join(dir, "state")}
+	b := &fakeBox{t: t, dir: dir, root: filepath.Join(dir, "srv"), state: filepath.Join(dir, "state"), private: filepath.Join(dir, "private")}
 	script := strings.NewReplacer(
 		"root=/srv/tomte", "root="+b.root,
 		"state=/var/lib/tomte", "state="+b.state,
+		"private=/var/lib/private/tomte", "private="+b.private,
 	).Replace(helperScript)
 	b.helper = filepath.Join(dir, "tomte-helper")
 	b.write(b.helper, script, 0o755)
@@ -168,7 +170,11 @@ func TestHelperRefusesBadNames(t *testing.T) {
 		{"runs", "a b", "5"},
 		{"runs", "digest", ""},
 		{"run", "../x", "task"},
-		{"rm", "digest"},
+		{"rollback", "../digest"},
+		{"rm", ".."},
+		{"rm", ""},
+		{"rm", "digest", "purge", "now"},
+		{"frobnicate", "digest"},
 	}
 	for _, args := range bad {
 		if out, err := b.run("", args...); err == nil {
@@ -277,5 +283,61 @@ func TestHelperSaysWhenItsOlder(t *testing.T) {
 	b := newFakeBox(t)
 	if out, _ := b.run("", "frobnicate", "digest"); !strings.Contains(out, "tomte-helper: unknown command") {
 		t.Errorf("out = %q", out)
+	}
+}
+
+func TestHelperRollback(t *testing.T) {
+	b := deployed(t, "digest")
+	if out, err := b.run("", "rollback", "digest"); err == nil || !strings.Contains(out, "no previous binary") {
+		t.Errorf("rollback with nothing to go back to: %v %q", err, out)
+	}
+	b.run(agent("digest")+"# v2\n", "stage", "def")
+	b.run("", "activate", "def", "digest")
+
+	d := filepath.Join(b.root, "digest")
+	read := func(f string) string { c, _ := os.ReadFile(filepath.Join(d, f)); return string(c) }
+	out, err := b.run("", "rollback", "digest")
+	if err != nil || !strings.Contains(out, `"name":"digest"`) {
+		t.Fatalf("rollback: %v\n%s", err, out)
+	}
+	if read("digest") != agent("digest") || !strings.HasSuffix(read("digest.prev"), "# v2\n") {
+		t.Errorf("after a rollback: %q, prev %q", read("digest"), read("digest.prev"))
+	}
+	// A second rollback undoes the first.
+	b.run("", "rollback", "digest")
+	if !strings.HasSuffix(read("digest"), "# v2\n") || read("digest.prev") != agent("digest") {
+		t.Errorf("after two rollbacks: %q, prev %q", read("digest"), read("digest.prev"))
+	}
+	if _, err := os.Stat(filepath.Join(d, "digest.next")); err == nil {
+		t.Error("digest.next was left behind")
+	}
+}
+
+func TestHelperRemove(t *testing.T) {
+	for _, purge := range []bool{false, true} {
+		b := deployed(t, "digest")
+		b.write(filepath.Join(b.private, "digest", "digest.jsonl"), "{}\n", 0o600)
+		args := []string{"rm", "digest"}
+		if purge {
+			args = append(args, "purge")
+		}
+		if out, err := b.run("", args...); err != nil {
+			t.Fatalf("rm: %v\n%s", err, out)
+		}
+		if !strings.Contains(b.calls(), "systemctl disable --now --quiet tomte@digest") {
+			t.Errorf("calls:\n%s", b.calls())
+		}
+		if _, err := os.Stat(filepath.Join(b.root, "digest")); err == nil {
+			t.Error("/srv/tomte/digest is still there")
+		}
+		if _, err := os.Stat(filepath.Join(b.private, "digest")); (err == nil) == purge {
+			t.Errorf("purge %v: run log there: %v", purge, err == nil)
+		}
+		if _, err := os.Stat(b.root); err != nil {
+			t.Errorf("the root went too: %v", err)
+		}
+		if out, err := b.run("", "rm", "digest"); err == nil || !strings.Contains(out, "no agent named digest") {
+			t.Errorf("rm twice: %v %q", err, out)
+		}
 	}
 }

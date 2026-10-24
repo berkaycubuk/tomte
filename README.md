@@ -161,6 +161,9 @@ tomte run gandalf hn-digest "send the digest"   # one task now, waiting for it
 tomte env gandalf hn-digest             # its variables, values hidden; -values to show them
 tomte env -edit gandalf hn-digest       # change them in $EDITOR, then restart it
 tomte env -set hn-digest.env gandalf hn-digest  # or replace them from a file
+tomte rollback gandalf hn-digest        # back to the binary before the last deploy; again to undo
+tomte rm gandalf hn-digest              # stop it and delete it; asks first, keeps its run log
+tomte rm -purge -y gandalf hn-digest    # run log too, without asking
 ```
 
 `tomte run` runs the agent as the service would, as its own user,

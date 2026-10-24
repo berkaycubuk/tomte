@@ -71,9 +71,15 @@ func helperCommand(args []string) string {
 		helperPath, notSetUp, quote(args...))
 }
 
+// isTerminal says whether f is a terminal, near enough without x/term: a
+// character device that isn't /dev/null, the one stdin is often given.
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	null, err := os.Stat(os.DevNull)
+	return err != nil || !os.SameFile(fi, null)
 }
 
 // output runs a shell command on the box and returns what it printed.

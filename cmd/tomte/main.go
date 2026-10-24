@@ -26,6 +26,8 @@ const usage = `usage:
   tomte logs [-f] [-n 50] <box> <agent>          an agent's log
   tomte runs [-n 10] [-json] <box> <agent>       an agent's last runs
   tomte run <box> <agent> <task>                 do one task now and wait for it
+  tomte rollback <box> <agent>                   go back to the binary before the last deploy
+  tomte rm [-purge] [-y] <box> <agent>           stop an agent and delete it
 `
 
 func main() {
@@ -34,13 +36,15 @@ func main() {
 		os.Exit(2)
 	}
 	commands := map[string]func([]string) error{
-		"setup":  setup,
-		"deploy": deploy,
-		"ls":     ls,
-		"env":    env,
-		"logs":   logs,
-		"runs":   runs,
-		"run":    run,
+		"setup":    setup,
+		"deploy":   deploy,
+		"ls":       ls,
+		"env":      env,
+		"logs":     logs,
+		"runs":     runs,
+		"run":      run,
+		"rollback": rollback,
+		"rm":       rm,
 	}
 	cmd, ok := commands[os.Args[1]]
 	if !ok {
