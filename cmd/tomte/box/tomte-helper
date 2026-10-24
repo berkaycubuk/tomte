@@ -1,0 +1,127 @@
+#!/bin/sh
+# tomte-helper is what the tomte command does on this machine, as root.
+# `tomte setup` installs it and lets the ssh user run it with sudo and no
+# password, and nothing else, so it takes only agent names and touches
+# only tomte@<name>, /srv/tomte/<name> and /var/lib/tomte/<name>.
+#
+#   tomte-helper stage <id>          an agent binary on stdin; prints its info
+#   tomte-helper env <name>          the agent's env file on stdin
+#   tomte-helper activate <id> <name> put the staged binary in place and (re)start it
+#   tomte-helper ls                  every agent: its unit, info and today's runs
+set -eu
+umask 022
+
+root=/srv/tomte
+state=/var/lib/tomte
+incoming=$root/.incoming
+
+die() {
+	echo "tomte-helper: $*" >&2
+	exit 1
+}
+
+valid_name() {
+	case $1 in
+	'' | -* | *[!a-z0-9-]*) return 1 ;;
+	esac
+	[ ${#1} -le 64 ]
+}
+
+check_name() {
+	valid_name "$1" || die "bad agent name \"$1\": use up to 64 lowercase letters, digits and dashes"
+}
+
+check_id() {
+	case $1 in
+	'' | *[!0-9a-f]*) die "bad upload id \"$1\"" ;;
+	esac
+}
+
+# describe runs `<binary> info` the way the service runs the agent, but
+# without a network.
+describe() { # binary [env file]
+	systemd-run --quiet --wait --pipe --collect \
+		-p DynamicUser=yes -p PrivateNetwork=yes -p ProtectSystem=strict -p ProtectHome=yes \
+		${2:+-p EnvironmentFile=-$2} "$1" info </dev/null
+}
+
+stage() {
+	check_id "$1"
+	mkdir -p "$incoming"
+	find "$incoming" -type f -mmin +60 -delete
+	f=$incoming/$1
+	cat >"$f"
+	chmod 755 "$f"
+	describe "$f" || {
+		rm -f "$f"
+		die "the binary didn't describe itself; is it a tomte agent, built with a tomte that has \`info\`?"
+	}
+}
+
+set_env() {
+	check_name "$1"
+	mkdir -p "$root/$1"
+	(
+		umask 077
+		cat >"$root/$1/env.new"
+	)
+	mv "$root/$1/env.new" "$root/$1/env"
+}
+
+activate() {
+	check_id "$1"
+	check_name "$2"
+	f=$incoming/$1
+	d=$root/$2
+	unit=tomte@$2
+	[ -f "$f" ] || die "nothing uploaded as $1"
+	mkdir -p "$d"
+	if [ ! -e "$d/env" ]; then
+		(
+			umask 077
+			: >"$d/env"
+		)
+	fi
+	if [ -e "$d/$2" ]; then
+		mv "$d/$2" "$d/$2.prev"
+	fi
+	mv "$f" "$d/$2"
+	systemctl enable --quiet "$unit"
+	systemctl restart "$unit"
+	# An agent that can't start fails within a second or two.
+	sleep 3
+	if ! systemctl is-active --quiet "$unit"; then
+		echo "$unit isn't running:" >&2
+		journalctl -u "$unit" -n 20 --no-pager -o cat >&2 || true
+		exit 1
+	fi
+}
+
+list() {
+	echo "now $(date +%s)"
+	today=$(date +%F)
+	for d in "$root"/*/; do
+		[ -d "$d" ] || continue
+		n=$(basename "$d")
+		valid_name "$n" && [ -x "$d$n" ] || continue
+		echo "agent $n"
+		systemctl show "tomte@$n" --timestamp=unix \
+			-p ActiveState -p SubState -p MemoryCurrent -p ActiveEnterTimestamp | sed 's/^/show /'
+		if i=$(describe "$d$n" "${d}env" 2>/dev/null); then
+			echo "info $i"
+		fi
+		log=$state/$n/$n.jsonl
+		if [ -r "$log" ]; then
+			grep -F "\"start\":\"$today" "$log" | sed 's/^/today /' || true
+			tail -n 1 "$log" | sed 's/^/last /'
+		fi
+	done
+}
+
+case ${1-} in
+stage) [ $# -eq 2 ] || die "usage: stage <id>" && stage "$2" ;;
+env) [ $# -eq 2 ] || die "usage: env <name>" && set_env "$2" ;;
+activate) [ $# -eq 3 ] || die "usage: activate <id> <name>" && activate "$2" "$3" ;;
+ls) [ $# -eq 1 ] || die "usage: ls" && list ;;
+*) die "usage: tomte-helper stage <id> | env <name> | activate <id> <name> | ls" ;;
+esac

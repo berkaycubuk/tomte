@@ -1,7 +1,7 @@
 # One unit for every agent on the machine: tomte@<name> runs
 # /srv/tomte/<name>/<name> with the variables in /srv/tomte/<name>/env.
+# `tomte setup` installs it and `tomte deploy` starts agents with it.
 #
-#   systemctl enable --now tomte@hn-digest
 #   journalctl -u tomte@hn-digest -f
 #
 # The run log is /var/lib/tomte/<name>/<name>.jsonl.
@@ -28,7 +28,9 @@ PrivateTmp=yes
 PrivateDevices=yes
 NoNewPrivileges=yes
 
-# Keeps one agent from starving the others on a small machine.
+# Keeps one agent from starving the others; tomte.slice keeps all of
+# them together from starving the rest of the machine.
+Slice=tomte.slice
 MemoryMax=128M
 CPUQuota=50%
 

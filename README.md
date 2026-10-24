@@ -40,6 +40,7 @@ func main() {
 ```
 ./invoice-chaser run "chase the invoices from March"   # one task, now
 ./invoice-chaser                                       # serve: run on the schedules
+./invoice-chaser info                                  # what it is, as JSON
 ```
 
 Tomte uses only Go's standard library. See [docs/design.md](docs/design.md)
@@ -97,37 +98,60 @@ tail -n 5 hn-digest.jsonl | jq '{start, trigger, tools, cost, result, error}'
 
 ## Deploying
 
-An agent is one binary and an env file. On a Linux machine with systemd:
+An agent is one binary and an env file, run by systemd. The `tomte`
+command does the copying over ssh:
 
 ```sh
-# build for the machine (arm64 for a Raspberry Pi)
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o hn-digest ./examples/hn-digest
+go install github.com/berkaycubuk/tomte/cmd/tomte@latest
 
-# copy it, with its settings
-ssh box 'sudo mkdir -p /srv/tomte/hn-digest'
-scp hn-digest box:/tmp/ && ssh box 'sudo mv /tmp/hn-digest /srv/tomte/hn-digest/'
-ssh box 'sudo tee /srv/tomte/hn-digest/env >/dev/null && sudo chmod 600 /srv/tomte/hn-digest/env' <<'EOF'
+tomte setup box                                   # once per machine
+tomte deploy -env hn-digest.env box ./examples/hn-digest
+tomte ls box
+```
+
+```
+AGENT       STATE        MEMORY   NEXT RUN    LAST RUN               TODAY
+hn-digest   active 3h    9.8M     Mon 08:00   2h ago, sent           1 run, $0.004 of $0.25
+```
+
+`box` is anything ssh takes: a host, `user@host` or an alias from
+`~/.ssh/config`. Nothing runs on the machine but the agents.
+
+**`tomte setup box`** asks for your sudo password once and installs:
+
+- `tomte@.service`, the unit every agent runs with. Each agent runs as
+  its own throwaway user (`DynamicUser`), can write only its state
+  directory (`/var/lib/tomte/<name>/`, where the run log is), and is
+  capped at 128 MB of memory and half a CPU.
+- `tomte.slice`, which all agents run in, so together they can't take
+  more than `-memory` (1G) and `-cpu` (100%, one core) from whatever else
+  runs on the machine.
+- `/usr/local/libexec/tomte-helper`, a short script that does what needs
+  root, and a sudoers rule that lets your ssh user run it, and only it,
+  without a password. It takes only agent names, and touches only
+  `tomte@<name>`, `/srv/tomte/<name>/` and `/var/lib/tomte/<name>/`.
+
+Run it again to upgrade those or change the limits; agents are left
+alone.
+
+**`tomte deploy box ./package`** builds the agent for the machine's
+architecture, uploads it, asks it its name (`./agent info`), puts it at
+`/srv/tomte/<name>/<name>` and (re)starts `tomte@<name>`. The binary it
+replaces is kept as `<name>.prev`. `-env file` uploads the agent's
+variables to `/srv/tomte/<name>/env`; without it the env file on the
+machine is kept:
+
+```sh
 MODEL_URL=https://openrouter.ai/api/v1
 MODEL=z-ai/glm-4.6
 MODEL_KEY=…
 TELEGRAM_TOKEN=…
 TELEGRAM_CHAT=…
 TZ=Europe/Istanbul
-EOF
-
-# once per machine: the unit every agent shares
-scp deploy/tomte@.service box:/tmp/ && ssh box 'sudo mv /tmp/tomte@.service /etc/systemd/system/ && sudo systemctl daemon-reload'
-
-ssh box 'sudo systemctl enable --now tomte@hn-digest'
 ```
 
-Each agent runs as its own throwaway user (`DynamicUser`), can write only
-its state directory (`/var/lib/tomte/<name>/`, where the run log is), and
-is capped at 128 MB of memory and half a CPU. Logs are in
-`journalctl -u tomte@hn-digest`. To update, copy the new binary and
-`systemctl restart tomte@hn-digest`; runs in progress get 60 s to finish.
-
-To try a deployed agent by hand:
+Runs in progress get 60 s to finish when an agent restarts. Logs are in
+`journalctl -u tomte@hn-digest`. To try a deployed agent by hand:
 
 ```sh
 sudo systemd-run --pty -p DynamicUser=yes -p StateDirectory=tomte/hn-digest \

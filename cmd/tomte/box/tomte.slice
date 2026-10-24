@@ -1,0 +1,10 @@
+# Every agent runs in this slice, so together they can't take more of
+# the machine than this, however many there are. `tomte setup -memory
+# -cpu` sets the limits.
+
+[Unit]
+Description=Tomte agents
+
+[Slice]
+MemoryMax={{.Memory}}
+CPUQuota={{.CPU}}

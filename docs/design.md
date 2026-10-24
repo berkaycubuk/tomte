@@ -112,19 +112,38 @@ chat, and turns link previews off.
 
 ### Deploying
 
-No tooling in v1. An agent is one binary and an env file: copy both to
-`/srv/tomte/<name>/` and start it with `deploy/tomte@.service`, one unit
-for every agent on the machine (`systemctl enable --now tomte@<name>`).
-Each runs as its own throwaway user with a private state directory for
-its run log, capped at 128 MB and half a CPU. The README has the steps.
+An agent is one binary and an env file in `/srv/tomte/<name>/`, started
+with `tomte@.service`, one unit for every agent on the machine. Each runs
+as its own throwaway user with a private state directory for its run
+log, capped at 128 MB and half a CPU, inside `tomte.slice`, which caps all
+agents together so they share a machine with other programs politely.
+
+The `tomte` command (`cmd/tomte`) does the deploying from your own
+machine, over ssh. It's a client, not a manager: systemd already keeps
+agents running, restarts them, limits them and keeps their logs, so
+nothing else runs on the box. The box is the source of truth: `tomte ls`
+reads what's in `/srv/tomte`, and there's no inventory to keep in step.
+
+- `tomte setup box` installs the unit, the slice and `tomte-helper`, a
+  short script that does everything needing root, with a sudoers rule
+  letting the ssh user run only that script. It accepts nothing but agent
+  names, so deploying doesn't need root on a box that runs other things.
+- `tomte deploy box ./pkg` builds for the box's architecture, uploads
+  the binary under a random id, and asks it its name with `./agent info`
+  (one line of JSON: name, schedules and their next runs, limits). Only
+  then does it replace `/srv/tomte/<name>/<name>`, keeping the old one as
+  `<name>.prev`, and restart the unit. The name comes from the code, so
+  the unit, the directory and the run log can't disagree.
+- `tomte ls box` shows every agent's state, memory, next and last run,
+  and what it spent today.
 
 ## Later
 
 Added when an agent needs them, in roughly this order: receiving messages
 over a channel, approvals before risky tools, webhooks, model fallbacks,
-resuming a run after a restart, a `tomte runs` command, `tomte new` and
-`tomte deploy`, MCP tools, test helpers, and several agents in one
-process to share memory on very small machines.
+resuming a run after a restart, more `tomte` commands (`logs`, `runs`,
+`run`, `env`, `rollback`, `rm`), `tomte new`, MCP tools, test helpers,
+and several agents in one process to share memory on very small machines.
 
 ## First version
 

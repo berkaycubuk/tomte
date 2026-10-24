@@ -208,6 +208,9 @@ func (a *Agent) Run() {
 }
 
 func (a *Agent) main(ctx context.Context, args []string) int {
+	if len(args) == 1 && args[0] == "info" {
+		return a.printInfo(os.Stdout)
+	}
 	if err := errors.Join(a.errs...); err != nil {
 		log.Printf("%s: %v", a.name, err)
 		return 2
@@ -222,7 +225,7 @@ func (a *Agent) main(ctx context.Context, args []string) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(os.Stderr, "usage: %s [serve]     run on the schedules\n       %s run <task>  do one task now\n", a.name, a.name)
+	fmt.Fprintf(os.Stderr, "usage: %[1]s [serve]     run on the schedules\n       %[1]s run <task>  do one task now\n       %[1]s info        describe the agent as JSON\n", a.name)
 	return 2
 }
 
