@@ -26,7 +26,10 @@ func run(args []string) error {
 		return runErr
 	}
 	r := recs[0]
-	fmt.Printf("\n%s: %s, %d steps, $%.3f", name, r.Took, r.Steps, r.Cost)
+	fmt.Printf("\n%s: %s", name, r.Took)
+	if r.Steps > 0 { // a job has no steps, and costs nothing
+		fmt.Printf(", %d steps, $%.3f", r.Steps, r.Cost)
+	}
 	if len(r.Tools) > 0 {
 		fmt.Printf(", tools: %s", strings.Join(r.Tools, ", "))
 	}

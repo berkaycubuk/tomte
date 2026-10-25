@@ -22,17 +22,19 @@ type info struct {
 	MaxSteps  int            `json:"max_steps"`
 	MaxRun    float64        `json:"max_cost_run,omitempty"`
 	MaxDay    float64        `json:"max_cost_day,omitempty"`
+	Journal   bool           `json:"journal,omitempty"` // tomte-helper looks for "journal":true
 	Errors    []string       `json:"errors,omitempty"`
 }
 
 type scheduleInfo struct {
 	Spec string    `json:"spec"`
-	Task string    `json:"task"`
+	Task string    `json:"task"` // a job's name for a job
+	Job  bool      `json:"job,omitempty"`
 	Next time.Time `json:"next"`
 }
 
 func (a *Agent) info() info {
-	in := info{Name: a.name, Channel: a.channel.Name(), MaxSteps: a.maxSteps, MaxRun: a.maxRun, MaxDay: a.maxDay}
+	in := info{Name: a.name, Channel: a.channel.Name(), MaxSteps: a.maxSteps, MaxRun: a.maxRun, MaxDay: a.maxDay, Journal: a.journal}
 	if a.model != nil {
 		in.Model = a.model.name
 	}
@@ -41,7 +43,7 @@ func (a *Agent) info() info {
 	}
 	now := a.now()
 	for _, s := range a.schedules {
-		in.Schedules = append(in.Schedules, scheduleInfo{Spec: s.spec, Task: s.task, Next: s.next(now)})
+		in.Schedules = append(in.Schedules, scheduleInfo{Spec: s.spec, Task: s.task, Job: s.job != nil, Next: s.next(now)})
 	}
 	for _, err := range a.errs {
 		in.Errors = append(in.Errors, err.Error())

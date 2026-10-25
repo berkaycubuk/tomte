@@ -8,6 +8,7 @@ package tomte
 // day fields are restricted a day matching either one fires.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -16,8 +17,9 @@ import (
 )
 
 type schedule struct {
-	spec, task string
-	every      time.Duration // for @every; the fields are unused then
+	spec, task string                                // task is a job's name for a job
+	job        func(context.Context) (string, error) // nil for the model's tasks
+	every      time.Duration                         // for @every; the fields are unused then
 
 	minute, hour, dom, month, dow uint64 // bit i set: value i matches
 	domStar, dowStar              bool

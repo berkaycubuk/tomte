@@ -23,6 +23,8 @@ TimeoutStopSec=90s
 # `tomte-helper run` starts one-off runs with the same settings; change
 # them there too.
 # Without User=, every agent would get the same user, named "tomte".
+# An agent built with tomte.ReadsJournal also gets the systemd-journal
+# group, from a drop-in tomte-helper writes in tomte@<name>.service.d.
 DynamicUser=yes
 User=tomte-%i
 StateDirectory=tomte/%i

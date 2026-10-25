@@ -71,6 +71,14 @@ shortcut (`@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`) or
 `NOTHING`, and nothing is sent. If a schedule's last run is still going,
 its next turn is skipped.
 
+**Jobs.** `tomte.Job(spec, name, fn)` with
+`fn func(context.Context) (string, error)` runs Go code on a schedule,
+with no model, for chores that need no judgment. What it returns is sent
+through the channel unless it's empty or `NOTHING`, an error is sent as a
+failure, and its runs are in the run log like the model's. `./agent run
+<name>` runs one now. An agent with only jobs needs no `tomte.Model`.
+[examples/ssh-watch](examples/ssh-watch) is one.
+
 **Channel.** `tomte.SendTo(channel)` sets where results and failures go;
 it's stdout if not given. `channels/telegram` sends to a Telegram chat. A
 channel is two methods, `Name()` and `Send(ctx, Message)`, so writing your
@@ -90,7 +98,8 @@ A run that fails or stops at a limit says so through the channel, and
 **Run log.** Each run adds one JSON line to `<name>.jsonl`, in
 `$STATE_DIRECTORY` or the working directory (`tomte.Log(path)` to change
 it): when, what started it, the task, tools called, tokens, cost, and the
-result or error. The daily limit counts from it.
+result or error. The daily limit counts from it. `tomte.StateDir()` is
+that directory, for an agent's own files.
 
 ```
 tail -n 5 hn-digest.jsonl | jq '{start, trigger, tools, cost, result, error}'
@@ -122,14 +131,17 @@ hn-digest   active 3h    9.8M     Mon 08:00   2h ago, sent           1 run, $0.0
 - `tomte@.service`, the unit every agent runs with. Each agent runs as
   its own throwaway user (`DynamicUser`), can write only its state
   directory (`/var/lib/tomte/<name>/`, where the run log is), and is
-  capped at 128 MB of memory and half a CPU.
+  capped at 128 MB of memory and half a CPU. An agent built with
+  `tomte.ReadsJournal()` also joins the `systemd-journal` group, to read
+  logs like sshd's; it's the only access an agent can ask for.
 - `tomte.slice`, which all agents run in, so together they can't take
   more than `-memory` (1G) and `-cpu` (100%, one core) from whatever else
   runs on the machine.
 - `/usr/local/libexec/tomte-helper`, a short script that does what needs
   root, and a sudoers rule that lets your ssh user run it, and only it,
   without a password. It takes only agent names, and touches only
-  `tomte@<name>`, `/srv/tomte/<name>/` and `/var/lib/tomte/<name>/`.
+  `tomte@<name>` (and its drop-ins), `/srv/tomte/<name>/` and
+  `/var/lib/tomte/<name>/`.
 
 Run it again to upgrade those or change the limits; agents are left
 alone.

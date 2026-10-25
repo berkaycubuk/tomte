@@ -30,6 +30,7 @@ type Agent struct {
 	maxRun       float64 // dollars per run, 0 for no limit
 	maxDay       float64 // dollars per day, 0 for no limit
 	logPath      string
+	journal      bool // reads the system journal
 	schedules    []*schedule
 	now          func() time.Time
 	errs         []error // mistakes in the options, reported by Do and Run
@@ -55,7 +56,7 @@ func New(name string, opts ...Option) *Agent {
 	for _, o := range opts {
 		o(a)
 	}
-	if a.model == nil {
+	if a.model == nil && a.needsModel() {
 		a.errs = append(a.errs, errors.New("no model: add tomte.Model(baseURL, name, key)"))
 	}
 	if a.maxRun < 0 || a.maxDay < 0 {
@@ -98,8 +99,22 @@ func Log(path string) Option {
 }
 
 func defaultLogPath(name string) string {
+	return filepath.Join(StateDir(), name+".jsonl")
+}
+
+// StateDir is the directory the agent may keep files in: its own one,
+// /var/lib/tomte/<name>, when deployed with the tomte command, and the
+// working directory ("") otherwise.
+func StateDir() string {
 	dir, _, _ := strings.Cut(os.Getenv("STATE_DIRECTORY"), ":")
-	return filepath.Join(dir, name+".jsonl")
+	return dir
+}
+
+// ReadsJournal lets the agent read the system journal, sshd's and sudo's
+// lines included, when it's deployed with the tomte command: its user
+// joins the systemd-journal group. Nothing else changes.
+func ReadsJournal() Option {
+	return func(a *Agent) { a.journal = true }
 }
 
 // ErrStepLimit is returned when a run uses all its steps without replying.
@@ -123,6 +138,9 @@ func (a *Agent) Do(ctx context.Context, task string) (Result, error) {
 func (a *Agent) run(ctx context.Context, trigger, task string) (Result, error) {
 	if err := errors.Join(a.errs...); err != nil {
 		return Result{}, err
+	}
+	if a.model == nil {
+		return Result{}, fmt.Errorf("no model to do %q with; this agent only does its jobs: %s", cut(task, 60), strings.Join(a.jobs(), ", "))
 	}
 	start := a.now()
 	var res Result
@@ -225,17 +243,30 @@ func (a *Agent) main(ctx context.Context, args []string) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(os.Stderr, "usage: %[1]s [serve]     run on the schedules\n       %[1]s run <task>  do one task now\n       %[1]s info        describe the agent as JSON\n", a.name)
+	fmt.Fprintf(os.Stderr, "usage: %[1]s [serve]     run on the schedules\n       %[1]s run <task>  do one task, or job, now\n       %[1]s info        describe the agent as JSON\n", a.name)
 	return 2
 }
 
 // runOnce does one task and sends the outcome, failures included, through
 // the channel: nobody may be watching the terminal.
 func (a *Agent) runOnce(ctx context.Context, trigger, task string) int {
-	res, err := a.run(ctx, trigger, task)
-	text, code := res.Text, 0
+	var text string
+	var err error
+	if s := a.job(task); s != nil {
+		if text, err = a.runJob(ctx, trigger, s); err != nil {
+			text = fmt.Sprintf("%s's job %s failed: %v", a.name, s.task, err)
+		}
+	} else {
+		var res Result
+		if res, err = a.run(ctx, trigger, task); err != nil {
+			text = a.failure(res, err)
+		} else {
+			text = res.Text
+		}
+	}
+	code := 0
 	if err != nil {
-		text, code = a.failure(res, err), 1
+		code = 1
 	}
 	if text == "" || text == nothing {
 		return code

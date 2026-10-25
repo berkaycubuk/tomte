@@ -25,6 +25,7 @@ func newFakeBox(t *testing.T) *fakeBox {
 		"root=/srv/tomte", "root="+b.root,
 		"state=/var/lib/tomte", "state="+b.state,
 		"private=/var/lib/private/tomte", "private="+b.private,
+		"units=/etc/systemd/system", "units="+filepath.Join(dir, "units"),
 	).Replace(helperScript)
 	b.helper = filepath.Join(dir, "tomte-helper")
 	b.write(b.helper, script, 0o755)
@@ -339,5 +340,48 @@ func TestHelperRemove(t *testing.T) {
 		if out, err := b.run("", "rm", "digest"); err == nil || !strings.Contains(out, "no agent named digest") {
 			t.Errorf("rm twice: %v %q", err, out)
 		}
+	}
+}
+
+// journalAgent is agent, built with tomte.ReadsJournal.
+func journalAgent(name string) string {
+	return strings.Replace(agent(name), `"schedules"`, `"journal":true,"schedules"`, 1)
+}
+
+func TestHelperLetsAnAgentReadTheJournal(t *testing.T) {
+	b := deployed(t, "watch")
+	dropin := filepath.Join(b.dir, "units", "tomte@watch.service.d", "journal.conf")
+	if _, err := os.Stat(dropin); err == nil {
+		t.Fatal("an agent that didn't ask for the journal can read it")
+	}
+
+	b.run(journalAgent("watch"), "stage", "def")
+	if out, err := b.run("", "activate", "def", "watch"); err != nil {
+		t.Fatalf("activate: %v\n%s", err, out)
+	}
+	if c, err := os.ReadFile(dropin); err != nil || string(c) != "[Service]\nSupplementaryGroups=systemd-journal\n" {
+		t.Fatalf("drop-in: %q %v", c, err)
+	}
+	if c := b.calls(); !strings.Contains(c, "systemctl daemon-reload") {
+		t.Errorf("calls:\n%s", c)
+	}
+	b.run("", "run", "watch", "logins")
+	if c := b.calls(); !strings.Contains(c, "SupplementaryGroups=systemd-journal") {
+		t.Errorf("a one-off run without the group:\n%s", c)
+	}
+
+	// Going back to a binary that didn't ask takes the group away.
+	if out, err := b.run("", "rollback", "watch"); err != nil {
+		t.Fatalf("rollback: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(dropin); err == nil {
+		t.Error("the drop-in outlived a rollback to a binary without the journal")
+	}
+	b.run("", "rollback", "watch")
+	if out, err := b.run("", "rm", "watch"); err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Dir(dropin)); err == nil {
+		t.Error("rm left the drop-in directory")
 	}
 }

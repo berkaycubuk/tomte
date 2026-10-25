@@ -2,8 +2,8 @@
 # tomte-helper is what the tomte command does on this machine, as root.
 # `tomte setup` installs it and lets the ssh user run it with sudo and no
 # password, and nothing else, so it takes only agent names and touches
-# only tomte@<name>, /srv/tomte/<name> and /var/lib/tomte/<name> (which
-# systemd keeps in /var/lib/private/tomte/<name>).
+# only tomte@<name> (and its drop-in directory), /srv/tomte/<name> and
+# /var/lib/tomte/<name> (which systemd keeps in /var/lib/private/tomte/<name>).
 #
 #   tomte-helper stage <id>           an agent binary on stdin; prints its info
 #   tomte-helper env <name>           the agent's env file on stdin
@@ -24,6 +24,7 @@ umask 022
 root=/srv/tomte
 state=/var/lib/tomte
 private=/var/lib/private/tomte
+units=/etc/systemd/system
 incoming=$root/.incoming
 
 die() {
@@ -81,6 +82,26 @@ stage() {
 	}
 }
 
+# access gives the agent's user the systemd-journal group, with a drop-in
+# for its unit, when the binary's info says "journal":true
+# (tomte.ReadsJournal), and takes it away when it doesn't. It's the only
+# access an agent can ask for.
+access() { # name binary
+	dropin=$units/tomte@$1.service.d
+	if describe "$2" 2>/dev/null | grep -qF '"journal":true'; then
+		mkdir -p "$dropin"
+		printf '[Service]\nSupplementaryGroups=systemd-journal\n' >"$dropin/journal.conf"
+	else
+		rm -f "$dropin/journal.conf"
+		rmdir "$dropin" 2>/dev/null || true
+	fi
+	systemctl daemon-reload
+}
+
+reads_journal() {
+	[ -e "$units/tomte@$1.service.d/journal.conf" ]
+}
+
 set_env() {
 	check_name "$1"
 	mkdir -p "$root/$1"
@@ -109,6 +130,7 @@ activate() {
 		mv "$d/$2" "$d/$2.prev"
 	fi
 	mv "$f" "$d/$2"
+	access "$2" "$d/$2"
 	systemctl enable --quiet "$unit"
 	restart "$2"
 	# Its schedules follow the TZ in the env file, which stage couldn't use.
@@ -155,8 +177,13 @@ runs() {
 run() {
 	check_agent "$1"
 	[ -n "$2" ] || die "no task"
+	groups=
+	if reads_journal "$1"; then
+		groups=systemd-journal
+	fi
 	exec systemd-run --quiet --wait --pipe --collect \
 		-p DynamicUser=yes -p User="tomte-$1" -p StateDirectory="tomte/$1" \
+		${groups:+-p SupplementaryGroups=$groups} \
 		-p EnvironmentFile="$root/$1/env" -p Slice=tomte.slice \
 		-p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p PrivateDevices=yes \
 		-p NoNewPrivileges=yes -p MemoryMax=128M -p CPUQuota=50% \
@@ -172,6 +199,7 @@ rollback() {
 	mv "$d/$1" "$d/$1.next"
 	mv "$d/$1.prev" "$d/$1"
 	mv "$d/$1.next" "$d/$1.prev"
+	access "$1" "$d/$1"
 	restart "$1"
 	describe "$d/$1" "$d/env" || true
 }
@@ -182,6 +210,11 @@ remove() {
 	systemctl disable --now --quiet "tomte@$1" || true
 	systemctl reset-failed "tomte@$1" 2>/dev/null || true
 	rm -rf "${root:?}/$1"
+	if reads_journal "$1"; then
+		rm -f "$units/tomte@$1.service.d/journal.conf"
+		rmdir "$units/tomte@$1.service.d" 2>/dev/null || true
+		systemctl daemon-reload
+	fi
 	if [ "${2-}" = purge ]; then
 		rm -rf "${private:?}/$1" "${state:?}/$1"
 	fi
