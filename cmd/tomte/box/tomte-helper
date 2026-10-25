@@ -32,8 +32,9 @@ die() {
 }
 
 valid_name() {
+	# Spelled out: what a-z matches depends on the locale.
 	case $1 in
-	'' | -* | *[!a-z0-9-]*) return 1 ;;
+	'' | -* | *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) return 1 ;;
 	esac
 	[ ${#1} -le 25 ]
 }
