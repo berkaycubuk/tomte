@@ -6,7 +6,7 @@
 //		go run ./examples/hn-digest run "send the digest"
 //
 // Without TELEGRAM_TOKEN the digest is printed. Run it with no arguments
-// to send one every weekday at 08:00.
+// to send one every day at 08:00.
 package main
 
 import (
@@ -36,7 +36,7 @@ func main() {
 		tomte.Instructions(strings.ReplaceAll(instructions, "{{interests}}", interests)),
 		tomte.Model(os.Getenv("MODEL_URL"), os.Getenv("MODEL"), os.Getenv("MODEL_KEY")),
 		tomte.Tool("top_stories", "The current top Hacker News stories, best first", topStories),
-		tomte.Cron("0 8 * * 1-5", "Send this morning's digest."),
+		tomte.Cron("0 8 * * *", "Send this morning's digest."),
 		tomte.Price(0.60, 2.20), // z-ai/glm-4.6 on OpenRouter; change it with the model
 		tomte.MaxCost(0.05, 0.25),
 		tomte.MaxSteps(5),
