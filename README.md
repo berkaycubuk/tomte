@@ -169,3 +169,7 @@ tomte rm -purge -y gandalf hn-digest    # run log too, without asking
 `tomte run` runs the agent as the service would, as its own user,
 `tomte-<name>`, and inside the same limits. Its reply goes through its
 channel, and the run is in the run log and `tomte runs` like any other.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
