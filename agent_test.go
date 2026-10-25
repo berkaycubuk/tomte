@@ -184,3 +184,24 @@ func TestRunOnceSendsTheReply(t *testing.T) {
 		t.Errorf("task = %q", task)
 	}
 }
+
+type failingChannel struct{}
+
+func (failingChannel) Name() string                        { return "broken" }
+func (failingChannel) Send(context.Context, Message) error { return errors.New("down") }
+
+func TestSendToSeveralChannels(t *testing.T) {
+	_, m := newFake(t, textReply("done"))
+	var one, two bytes.Buffer
+	a := New("chaser", m, SendTo(writerChannel{&one}, failingChannel{}, writerChannel{&two}))
+	if name := a.channel.Name(); name != "stdout, broken, stdout" {
+		t.Errorf("name = %q", name)
+	}
+	// One channel failing doesn't stop the others, but the run says so.
+	if code := a.main(context.Background(), []string{"run", "chase"}); code != 1 {
+		t.Errorf("exit code = %d", code)
+	}
+	if one.String() != "done\n" || two.String() != "done\n" {
+		t.Errorf("sent %q and %q", one.String(), two.String())
+	}
+}

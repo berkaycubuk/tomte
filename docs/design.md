@@ -104,7 +104,8 @@ that a channel implements and the core finds with a type assertion, so
 adding them doesn't break existing channels.
 
 An agent picks its channel with `tomte.SendTo(…)`; without one it uses
-`tomte.Stdout()`. v1 ships `stdout` and `telegram`.
+`tomte.Stdout()`; given several, it sends each result to all of them. v1
+ships `stdout` and `telegram`; `telekinesis` came after.
 
 The Telegram channel turns the model's markdown into the HTML Telegram
 takes (and sends plain text when Telegram can't parse it), starts each

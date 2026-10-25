@@ -80,7 +80,9 @@ failure, and its runs are in the run log like the model's. `./agent run
 [examples/ssh-watch](examples/ssh-watch) is one.
 
 **Channel.** `tomte.SendTo(channel)` sets where results and failures go;
-it's stdout if not given. `channels/telegram` sends to a Telegram chat. A
+it's stdout if not given, and with several channels each result goes to
+all of them. `channels/telegram` sends to a Telegram chat and
+`channels/telekinesis` to [telekinesis](https://telekinesis.berkay.tools). A
 channel is two methods, `Name()` and `Send(ctx, Message)`, so writing your
 own is short.
 
@@ -157,8 +159,7 @@ machine is kept:
 MODEL_URL=https://openrouter.ai/api/v1
 MODEL=z-ai/glm-4.6
 MODEL_KEY=…
-TELEGRAM_TOKEN=…
-TELEGRAM_CHAT=…
+TK_TOKEN=tk_…
 TZ=Europe/Istanbul
 ```
 

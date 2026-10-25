@@ -82,8 +82,17 @@ func Model(baseURL, name, key string) Option {
 }
 
 // SendTo sets where the agent's results go; it's Stdout if not given.
-func SendTo(c Channel) Option {
-	return func(a *Agent) { a.channel = c }
+// With several channels each result goes to all of them.
+func SendTo(cs ...Channel) Option {
+	return func(a *Agent) {
+		switch len(cs) {
+		case 0:
+		case 1:
+			a.channel = cs[0]
+		default:
+			a.channel = multiChannel(cs)
+		}
+	}
 }
 
 // MaxSteps caps the model calls in one run; it's 20 if not given.

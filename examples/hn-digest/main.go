@@ -1,11 +1,11 @@
 // HN digest sends a short morning digest of the Hacker News stories that
-// match your interests to Telegram.
+// match your interests to telekinesis.
 //
 //	MODEL_URL=https://openrouter.ai/api/v1 MODEL=z-ai/glm-4.6 MODEL_KEY=… \
-//	TELEGRAM_TOKEN=… TELEGRAM_CHAT=… INTERESTS="Go, SQLite, self-hosting" \
+//	TK_TOKEN=tk_… INTERESTS="Go, SQLite, self-hosting" \
 //		go run ./examples/hn-digest run "send the digest"
 //
-// Without TELEGRAM_TOKEN the digest is printed. Run it with no arguments
+// Without TK_TOKEN the digest is printed. Run it with no arguments
 // to send one every day at 08:00.
 package main
 
@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/berkaycubuk/tomte"
-	"github.com/berkaycubuk/tomte/channels/telegram"
+	"github.com/berkaycubuk/tomte/channels/telekinesis"
 )
 
 //go:embed instructions.md
@@ -41,8 +41,8 @@ func main() {
 		tomte.MaxCost(0.05, 0.25),
 		tomte.MaxSteps(5),
 	}
-	if token := os.Getenv("TELEGRAM_TOKEN"); token != "" {
-		opts = append(opts, tomte.SendTo(telegram.New(token, os.Getenv("TELEGRAM_CHAT"))))
+	if token := os.Getenv("TK_TOKEN"); token != "" {
+		opts = append(opts, tomte.SendTo(telekinesis.New(token)))
 	}
 	tomte.New("hn-digest", opts...).Run()
 }
