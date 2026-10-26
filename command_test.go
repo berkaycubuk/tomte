@@ -61,13 +61,15 @@ func TestCommands(t *testing.T) {
 		{From: "7", Text: "hello"},
 		{From: "8", Text: "/start"},
 		{From: "9", Text: "/secret"},
+		{From: "10", Text: "/help"},
 	}}
 	a := New("site", jobLog(t), SendTo(ch),
 		Command("/report", "Report on a site", report),
 		Command("quiet", "", quiet),
 		Command("fail", "", fail),
 		Command("boom", "", boom),
-		HiddenCommand("secret", func(context.Context, Request) (string, error) { return "found it", nil }),
+		HiddenCommand("secret", "Owner only", func(context.Context, Request) (string, error) { return "found it", nil }),
+		Owner("10"),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -79,14 +81,15 @@ func TestCommands(t *testing.T) {
 	got := ch.replies()
 	help := "Commands:\n/report: Report on a site\n/quiet\n/fail\n/boom\n/help: this list"
 	want := map[string]string{
-		"1": "report on example.com for 1",
-		"2": "report on a.com for 2",
-		"4": "Sorry, /fail didn't work. Try again later.",
-		"5": "Sorry, /boom didn't work. Try again later.",
-		"6": "There's no /nope.\n\n" + help,
-		"7": help,
-		"8": help,
-		"9": "found it", // answered, though help leaves it out
+		"1":  "report on example.com for 1",
+		"2":  "report on a.com for 2",
+		"4":  "Sorry, /fail didn't work. Try again later.",
+		"5":  "Sorry, /boom didn't work. Try again later.",
+		"6":  "There's no /nope.\n\n" + help,
+		"7":  help,
+		"8":  help,
+		"9":  "found it", // answered, though help leaves it out
+		"10": help + "\n\nOnly yours:\n/secret: Owner only",
 	}
 	if len(got) != len(want) {
 		t.Errorf("replies = %q", got)

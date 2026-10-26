@@ -37,6 +37,7 @@ type Agent struct {
 	journal      bool // reads the system journal
 	schedules    []*schedule
 	commands     []*command
+	owner        string // who sees hidden commands listed
 	now          func() time.Time
 	errs         []error // mistakes in the options, reported by Do and Run
 

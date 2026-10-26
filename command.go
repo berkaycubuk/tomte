@@ -42,10 +42,16 @@ func Command(name, description string, fn func(context.Context, Request) (string
 }
 
 // HiddenCommand is a Command left out of the list of commands, for one
-// only the agent's owner uses, like /approve on a public bot. Anyone can
-// still send it, so fn checks who's asking.
-func HiddenCommand(name string, fn func(context.Context, Request) (string, error)) Option {
-	return declare(command{name: name, hidden: true, fn: fn})
+// only the agent's owner uses, like /approve on a public bot. The Owner
+// still sees it listed. Anyone can send it, so fn checks who's asking.
+func HiddenCommand(name, description string, fn func(context.Context, Request) (string, error)) Option {
+	return declare(command{name: name, description: description, hidden: true, fn: fn})
+}
+
+// Owner is the sender, in the channel's terms, who sees hidden commands
+// in the list of commands, so they don't have to remember them.
+func Owner(from string) Option {
+	return func(a *Agent) { a.owner = from }
 }
 
 func declare(c command) Option {
@@ -89,28 +95,44 @@ func parseCommand(text string) (name, args string, ok bool) {
 	return strings.ToLower(word), args, true
 }
 
-func (a *Agent) help() string {
+// help is the list of commands, with the hidden ones after for the
+// owner.
+func (a *Agent) help(from string) string {
 	var b strings.Builder
 	b.WriteString("Commands:")
 	for _, c := range a.commands {
-		if c.hidden {
-			continue
-		}
-		fmt.Fprintf(&b, "\n/%s", c.name)
-		if c.description != "" {
-			b.WriteString(": " + c.description)
+		if !c.hidden {
+			writeCommand(&b, c)
 		}
 	}
 	if a.command("help") == nil {
 		b.WriteString("\n/help: this list")
 	}
+	if a.owner != "" && from == a.owner {
+		var owner strings.Builder
+		for _, c := range a.commands {
+			if c.hidden {
+				writeCommand(&owner, c)
+			}
+		}
+		if owner.Len() > 0 {
+			b.WriteString("\n\nOnly yours:" + owner.String())
+		}
+	}
 	return b.String()
+}
+
+func writeCommand(b *strings.Builder, c *command) {
+	fmt.Fprintf(b, "\n/%s", c.name)
+	if c.description != "" {
+		b.WriteString(": " + c.description)
+	}
 }
 
 // answer does what in asks and sends the reply back to its sender
 // through r.
 func (a *Agent) answer(ctx context.Context, r Receiver, in Incoming) {
-	text := a.help()
+	text := a.help(in.From)
 	if name, args, ok := parseCommand(in.Text); ok {
 		if c := a.command(name); c != nil {
 			var err error
