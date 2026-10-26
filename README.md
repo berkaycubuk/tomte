@@ -1,11 +1,25 @@
 # Tomte
 
+[![test](https://github.com/berkaycubuk/tomte/actions/workflows/test.yml/badge.svg)](https://github.com/berkaycubuk/tomte/actions/workflows/test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/berkaycubuk/tomte.svg)](https://pkg.go.dev/github.com/berkaycubuk/tomte)
+
 Small agents that do one job, in Go.
 
 A tomte is the farm spirit that quietly does the chores at night. A Tomte
 agent is a Go program that does one task, on a schedule or when asked, and
 compiles to one small binary: about 6 MB, and about 11 MB of memory while
 it waits. Dozens fit on a small machine.
+
+- **Safe to leave alone.** Every run has a step, time and dollar limit,
+  and a run that fails or stops says so through the agent's channel.
+- **Just Go.** Tools, jobs and commands are Go functions, and the
+  configuration is Go code: no YAML, no plugins, no dependencies.
+- **One command to deploy.** `tomte deploy box ./agent` builds it,
+  uploads it over ssh and runs it as a sandboxed systemd service. Nothing
+  else runs on the machine.
+
+**Status:** early. Its author runs agents with it, but the API may
+change before v1.0.
 
 ```go
 package main
@@ -82,9 +96,9 @@ failure, and its runs are in the run log like the model's. `./agent run
 **Channel.** `tomte.SendTo(channel)` sets where results and failures go;
 it's stdout if not given, and with several channels each result goes to
 all of them. `channels/telegram` sends to a Telegram chat and
-`channels/telekinesis` to [telekinesis](https://telekinesis.berkay.tools). A
-channel is two methods, `Name()` and `Send(ctx, Message)`, so writing your
-own is short. A `Message` with `To` set goes to that recipient (a Telegram
+`channels/telekinesis` to [telekinesis](https://telekinesis.berkay.tools),
+a web app with push notifications by Tomte's author. A channel is two
+methods, `Name()` and `Send(ctx, Message)`, so writing your own is short. A `Message` with `To` set goes to that recipient (a Telegram
 chat id) instead of the channel's own, so a job can write to many people.
 
 **Commands.** `tomte.Command(name, description, fn)` with
@@ -116,6 +130,9 @@ themselves, from `Request.From`, what a stranger may do.
 **Limits.** Nobody watches a scheduled run, so:
 
 - `tomte.MaxSteps(n)`: model calls per run, 20 if not given.
+- `tomte.Timeout(d)`: how long a run, job or command may take, 10 minutes
+  if not given; 0 means none. A run that reaches it stops waiting, even
+  for a tool that ignores its context.
 - `tomte.Price(in, out)`: the model's price in dollars per million tokens.
 - `tomte.MaxCost(perRun, perDay)`: dollar limits; 0 means none. A run
   stops after the call that reaches its limit; a run doesn't start once
@@ -137,7 +154,10 @@ tail -n 5 hn-digest.jsonl | jq '{start, trigger, tools, cost, result, error}'
 ## Deploying
 
 An agent is one binary and an env file, run by systemd. The `tomte`
-command does the copying over ssh:
+command does the copying over ssh. It needs Go 1.25 or newer where you
+build, on its latest patch release since the agents are built with it,
+and on the machine Linux with systemd 247 or newer (Debian 11, Ubuntu
+22.04 or later) and an ssh user who may use sudo.
 
 ```sh
 go install github.com/berkaycubuk/tomte/cmd/tomte@latest
@@ -159,8 +179,9 @@ hn-digest   active 3h    9.8M     Mon 08:00   2h ago, sent           1 run, $0.0
 
 - `tomte@.service`, the unit every agent runs with. Each agent runs as
   its own throwaway user (`DynamicUser`), can write only its state
-  directory (`/var/lib/tomte/<name>/`, where the run log is), and is
-  capped at 128 MB of memory and half a CPU. An agent built with
+  directory (`/var/lib/tomte/<name>/`, where the run log is), has no
+  capabilities, devices or kernel settings, and only the system calls a
+  service needs, and is capped at 128 MB of memory and half a CPU. An agent built with
   `tomte.ReadsJournal()` also joins the `systemd-journal` group, to read
   logs like sshd's; it's the only access an agent can ask for.
 - `tomte.slice`, which all agents run in, so together they can't take
@@ -209,6 +230,25 @@ tomte rm -purge -y gandalf hn-digest    # run log too, without asking
 `tomte run` runs the agent as the service would, as its own user,
 `tomte-<name>`, and inside the same limits. Its reply goes through its
 channel, and the run is in the run log and `tomte runs` like any other.
+
+## What's trusted with what
+
+- **The ssh user** can deploy, configure, run and remove agents through
+  `tomte-helper`, and nothing else as root. Since it deploys their code,
+  it can do whatever an agent may do, reading the journal included with
+  `tomte.ReadsJournal()`.
+- **An agent** runs as its own user, in the sandbox above. It can reach
+  the network, and write only its state directory.
+- **Env files** hold an agent's secrets in plain text, readable by root
+  and given only to that agent.
+- **People writing to a bot** reach only its commands, which are Go code.
+  A Telegram bot takes them from its own chat, which for a group means
+  everyone in it; a `Public()` bot takes them from anyone. Nothing limits
+  how often they write, and a command decides from `Request.From` what a
+  sender may do, so a command that fetches a URL it's given fetches it for
+  a stranger too.
+
+See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## License
 

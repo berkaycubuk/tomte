@@ -25,6 +25,10 @@ func Job(spec, name string, fn func(context.Context) (string, error)) Option {
 			a.errs = append(a.errs, fmt.Errorf("job %q: name it with one word", name))
 			return
 		}
+		if a.job(name) != nil {
+			a.errs = append(a.errs, fmt.Errorf("job %s is declared twice", name))
+			return
+		}
 		s.task, s.job = name, fn
 		a.schedules = append(a.schedules, s)
 	}
@@ -65,14 +69,16 @@ func (a *Agent) needsModel() bool {
 
 func (a *Agent) runJob(ctx context.Context, trigger string, s *schedule) (text string, err error) {
 	start := a.now()
-	func() {
+	ctx, cancel := a.limit(ctx)
+	defer cancel()
+	text, err = within(ctx, func() (text string, err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("panicked: %v", r)
 			}
 		}()
-		text, err = s.job(ctx)
-	}()
+		return s.job(ctx)
+	})
 	text = strings.TrimSpace(text)
 	a.mu.Lock()
 	a.logRun(start, trigger, s.task, Result{Text: text}, err)

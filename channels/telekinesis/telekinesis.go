@@ -1,7 +1,7 @@
 // Package telekinesis sends an agent's results to a person through
 // telekinesis (https://telekinesis.berkay.tools), which shows them in its
-// web app with a push notification. Make the agent a token in Settings →
-// Agents:
+// web app with a push notification. Telekinesis is made by Tomte's
+// author. Make the agent a token in Settings → Agents:
 //
 //	tomte.SendTo(telekinesis.New(os.Getenv("TK_TOKEN")))
 //
@@ -28,12 +28,15 @@ import (
 // maxText is the API's limit on a message's text, in bytes.
 const maxText = 32 << 10
 
+// Channel sends to one agent's conversation in telekinesis.
 type Channel struct {
 	token string
 	api   string // the server's base URL, changed by tests
 	http  *http.Client
 }
 
+// New is a channel with an agent token from telekinesis, which names the
+// agent and the person it writes to.
 func New(token string) *Channel {
 	return &Channel{token: token, api: "https://telekinesis.berkay.tools", http: &http.Client{Timeout: 30 * time.Second}}
 }

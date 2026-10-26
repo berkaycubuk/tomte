@@ -119,14 +119,16 @@ func (a *Agent) answer(ctx context.Context, r Receiver, in Incoming) {
 // runCommand runs c and logs it, with the channel as its trigger.
 func (a *Agent) runCommand(ctx context.Context, trigger string, c *command, req Request, task string) (text string, err error) {
 	start := a.now()
-	func() {
+	ctx, cancel := a.limit(ctx)
+	defer cancel()
+	text, err = within(ctx, func() (text string, err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("panicked: %v", r)
 			}
 		}()
-		text, err = c.fn(ctx, req)
-	}()
+		return c.fn(ctx, req)
+	})
 	text = strings.TrimSpace(text)
 	a.mu.Lock()
 	a.logRun(start, trigger, task, Result{Text: text}, err)

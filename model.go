@@ -146,7 +146,7 @@ func (m *model) post(ctx context.Context, body []byte) (message, Usage, bool, er
 func snippet(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > 300 {
-		s = s[:300] + "…"
+		s = headBytes(s, 300) + "…"
 	}
 	return s
 }

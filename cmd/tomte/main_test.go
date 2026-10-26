@@ -29,6 +29,15 @@ func TestSetupScript(t *testing.T) {
 			t.Errorf("setup.sh has no %q", want)
 		}
 	}
+	// Run as root on someone's machine, the scripts get the strictest
+	// reading there is, where there's one.
+	if _, err := exec.LookPath("shellcheck"); err == nil {
+		helper := filepath.Join(t.TempDir(), "tomte-helper")
+		os.WriteFile(helper, []byte(helperScript), 0o644)
+		if out, err := exec.Command("shellcheck", "-s", "sh", path, helper).CombinedOutput(); err != nil {
+			t.Errorf("shellcheck: %v\n%s", err, out)
+		}
+	}
 	// The files go in whole, through heredocs that end where they should.
 	for _, f := range []string{unitFile, helperScript} {
 		if !strings.Contains(script, f+"TOMTE_EOF\n") {

@@ -61,12 +61,30 @@ check_id() {
 	esac
 }
 
+# limits keep a binary that hangs or grows while describing itself, or
+# while its log is read, from holding up the tomte command or the machine.
+limits='-p RuntimeMaxSec=30 -p MemoryMax=128M -p CPUQuota=50% -p Slice=tomte.slice'
+
 # describe runs `<binary> info` the way the service runs the agent, but
 # without a network.
 describe() { # binary [env file]
-	systemd-run --quiet --wait --pipe --collect \
+	# shellcheck disable=SC2086 # $limits is several words
+	systemd-run --quiet --wait --pipe --collect $limits \
 		-p DynamicUser=yes -p PrivateNetwork=yes -p ProtectSystem=strict -p ProtectHome=yes \
 		${2:+-p EnvironmentFile=-$2} "$1" info </dev/null
+}
+
+# as_agent runs a command as the agent's own user, with its state
+# directory and without a network. The run log is the agent's to write,
+# so it's read this way: as root, a symlink in it could reach any file.
+as_agent() { # name [systemd-run options] command...
+	n=$1
+	shift
+	# shellcheck disable=SC2086 # $limits is several words
+	systemd-run --quiet --wait --pipe --collect $limits \
+		-p DynamicUser=yes -p User="tomte-$n" -p StateDirectory="tomte/$n" \
+		-p PrivateNetwork=yes -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes \
+		"$@" </dev/null
 }
 
 stage() {
@@ -166,10 +184,10 @@ logs() {
 runs() {
 	check_name "$1"
 	check_count "$2"
-	log=$state/$1/$1.jsonl
-	if [ -r "$log" ]; then
-		tail -n "$2" "$log"
-	fi
+	# A log stays after its agent is removed; one that never ran has none.
+	[ -d "$state/$1" ] || return 0
+	# shellcheck disable=SC2016 # the inner shell expands them
+	as_agent "$1" /bin/sh -c '[ ! -e "$1" ] || tail -n "$2" "$1"' sh "$state/$1/$1.jsonl" "$2"
 }
 
 # run does one task the way the service would: as the agent's own user,
@@ -187,6 +205,12 @@ run() {
 		-p EnvironmentFile="$root/$1/env" -p Slice=tomte.slice \
 		-p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p PrivateDevices=yes \
 		-p NoNewPrivileges=yes -p MemoryMax=128M -p CPUQuota=50% \
+		-p CapabilityBoundingSet= -p "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX" \
+		-p RestrictNamespaces=yes -p RestrictRealtime=yes -p LockPersonality=yes \
+		-p MemoryDenyWriteExecute=yes -p ProtectKernelTunables=yes -p ProtectKernelModules=yes \
+		-p ProtectKernelLogs=yes -p ProtectControlGroups=yes -p ProtectClock=yes \
+		-p ProtectHostname=yes -p ProtectProc=invisible -p SystemCallArchitectures=native \
+		-p SystemCallFilter=@system-service -p SystemCallErrorNumber=EPERM -p UMask=0077 \
 		"$root/$1/$1" run "$2" </dev/null
 }
 
@@ -222,7 +246,6 @@ remove() {
 
 list() {
 	echo "now $(date +%s)"
-	today=$(date +%F)
 	for d in "$root"/*/; do
 		[ -d "$d" ] || continue
 		n=$(basename "$d")
@@ -230,14 +253,14 @@ list() {
 		echo "agent $n"
 		systemctl show "tomte@$n" --timestamp=unix \
 			-p ActiveState -p SubState -p MemoryCurrent -p ActiveEnterTimestamp | sed 's/^/show /'
-		if i=$(describe "$d$n" "${d}env" 2>/dev/null); then
-			echo "info $i"
-		fi
-		log=$state/$n/$n.jsonl
-		if [ -r "$log" ]; then
-			grep -F "\"start\":\"$today" "$log" | sed 's/^/today /' || true
-			tail -n 1 "$log" | sed 's/^/last /'
-		fi
+		# One unit per agent describes it and reads its log. Its env
+		# file's TZ, which its run log's times are in, says when today is.
+		# shellcheck disable=SC2016 # the inner shell expands them
+		as_agent "$n" -p EnvironmentFile=-"${d}env" /bin/sh -c '
+			if i=$("$1" info 2>/dev/null); then echo "info $i"; fi
+			[ -e "$2" ] || exit 0
+			grep -F "\"start\":\"$(date +%F)" "$2" | sed "s/^/today /" || true
+			tail -n 1 "$2" | sed "s/^/last /"' sh "$d$n" "$state/$n/$n.jsonl" 2>/dev/null || true
 	done
 }
 

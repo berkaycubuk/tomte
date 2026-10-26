@@ -6,9 +6,10 @@ package tomte
 // counts the day's spending.
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -60,8 +61,14 @@ func (a *Agent) logRun(start time.Time, trigger, task string, res Result, err er
 	}
 }
 
+// spentWindow is how much of the end of the log spentOn reads first.
+var spentWindow int64 = 64 << 10
+
 // spentOn sums the cost of the logged runs that started on day's date,
-// in day's time zone. Lines it can't read are skipped.
+// in day's time zone. Runs are logged as they end, so the log is read
+// from its end, in a window that doubles until it reaches a run that
+// ended before the day began: every line before that one did too. Lines
+// it can't read are skipped.
 func (a *Agent) spentOn(day time.Time) float64 {
 	f, err := os.Open(a.logPath)
 	if err != nil {
@@ -71,23 +78,48 @@ func (a *Agent) spentOn(day time.Time) float64 {
 		return 0
 	}
 	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		log.Printf("%s: run log: %v", a.name, err)
+		return 0
+	}
 	y, m, d := day.Date()
-	var total float64
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	for sc.Scan() {
-		var r struct {
-			Start time.Time `json:"start"`
-			Cost  float64   `json:"cost"`
+	// A minute early, for clocks and the rounding of "took".
+	before := time.Date(y, m, d, 0, 0, 0, 0, day.Location()).Add(-time.Minute)
+	for window := spentWindow; ; window *= 2 {
+		off := max(fi.Size()-window, 0)
+		buf := make([]byte, fi.Size()-off)
+		if _, err := f.ReadAt(buf, off); err != nil && !errors.Is(err, io.EOF) {
+			log.Printf("%s: run log: %v", a.name, err)
+			return 0
 		}
-		if json.Unmarshal(sc.Bytes(), &r) != nil {
-			continue
+		lines := bytes.Split(buf, []byte("\n"))
+		if off > 0 {
+			lines = lines[1:] // cut by the window
 		}
-		if ry, rm, rd := r.Start.In(day.Location()).Date(); ry == y && rm == m && rd == d {
-			total += r.Cost
+		var total float64
+		done := off == 0
+		for _, line := range lines {
+			var r struct {
+				Start time.Time `json:"start"`
+				Took  string    `json:"took"`
+				Cost  float64   `json:"cost"`
+			}
+			if json.Unmarshal(line, &r) != nil {
+				continue
+			}
+			took, _ := time.ParseDuration(r.Took)
+			if r.Start.Add(took).Before(before) {
+				done = true
+			}
+			if ry, rm, rd := r.Start.In(day.Location()).Date(); ry == y && rm == m && rd == d {
+				total += r.Cost
+			}
+		}
+		if done {
+			return total
 		}
 	}
-	return total
 }
 
 func cut(s string, n int) string {

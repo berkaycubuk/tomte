@@ -33,6 +33,25 @@ ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
 NoNewPrivileges=yes
+# And none of the kernel, other processes or root's powers: an agent is
+# a Go program that talks to the network and writes its state directory.
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
 
 # Keeps one agent from starving the others; tomte.slice keeps all of
 # them together from starving the rest of the machine.

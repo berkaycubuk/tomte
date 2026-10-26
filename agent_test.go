@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 // fakeModel serves the chat completions API with scripted replies and
@@ -146,6 +148,27 @@ func TestOptionMistakes(t *testing.T) {
 	_, err := a.Do(context.Background(), "go")
 	if err == nil || !strings.Contains(err.Error(), "no model") || !strings.Contains(err.Error(), "declared twice") {
 		t.Errorf("err = %v", err)
+	}
+	noop := func(context.Context) (string, error) { return "", nil }
+	for want, opts := range map[string][]Option{
+		"MaxSteps needs at least 1":   {Model("http://x", "m", ""), MaxSteps(0)},
+		"job sweep is declared twice": {Job("@daily", "sweep", noop), Job("@hourly", "sweep", noop)},
+	} {
+		if err := errors.Join(New("t", opts...).errs...); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want %q, got %v", want, err)
+		}
+	}
+}
+
+func TestLongResultsAreCutBetweenCharacters(t *testing.T) {
+	s := strings.Repeat("ü", maxResult) // two bytes each
+	got := truncate("a" + s)            // so maxResult falls inside one
+	head, _, _ := strings.Cut(got, "\n[cut off")
+	if !utf8.ValidString(got) || len(head) != maxResult-1 || !strings.HasSuffix(got, fmt.Sprintf("%d more bytes]", 1+2*maxResult-len(head))) {
+		t.Errorf("cut to %d bytes, valid %v: %q", len(head), utf8.ValidString(got), got[len(got)-40:])
+	}
+	if got := snippet([]byte(strings.Repeat("ü", 200))); !utf8.ValidString(got) {
+		t.Errorf("snippet isn't valid UTF-8: %q", got)
 	}
 }
 

@@ -18,6 +18,9 @@ import (
 	"time"
 )
 
+// Agent is one agent: its declaration, from New, and its run log. Run
+// is its main; Do runs it on one task from Go code. An Agent is safe to
+// use from several goroutines.
 type Agent struct {
 	name         string
 	instructions string
@@ -26,6 +29,7 @@ type Agent struct {
 	specs        []toolSpec // in declaration order, for the model
 	channel      Channel
 	maxSteps     int
+	timeout      time.Duration // per run, job or command, 0 for no limit
 	price        *price
 	maxRun       float64 // dollars per run, 0 for no limit
 	maxDay       float64 // dollars per day, 0 for no limit
@@ -41,6 +45,8 @@ type Agent struct {
 	inflight float64 // spent by runs in this process that aren't logged yet
 }
 
+// Option is part of an agent's declaration, given to New: Model, Tool,
+// Cron and the rest.
 type Option func(*Agent)
 
 // New declares an agent. Mistakes in the options are reported when it
@@ -51,6 +57,7 @@ func New(name string, opts ...Option) *Agent {
 		tools:    map[string]*tool{},
 		channel:  Stdout(),
 		maxSteps: 20,
+		timeout:  10 * time.Minute,
 		logPath:  defaultLogPath(name),
 		now:      time.Now,
 	}
@@ -59,6 +66,12 @@ func New(name string, opts ...Option) *Agent {
 	}
 	if a.model == nil && a.needsModel() {
 		a.errs = append(a.errs, errors.New("no model: add tomte.Model(baseURL, name, key)"))
+	}
+	if a.maxSteps < 1 {
+		a.errs = append(a.errs, errors.New("MaxSteps needs at least 1"))
+	}
+	if a.timeout < 0 {
+		a.errs = append(a.errs, errors.New("Timeout can't be negative"))
 	}
 	if a.maxRun < 0 || a.maxDay < 0 {
 		a.errs = append(a.errs, errors.New("MaxCost limits can't be negative"))
@@ -159,7 +172,12 @@ func (a *Agent) run(ctx context.Context, trigger, task string) (Result, error) {
 	var res Result
 	b, err := a.startBudget(start)
 	if err == nil {
-		res, err = a.loop(ctx, trigger, task, start, b)
+		lctx, cancel := a.limit(ctx)
+		res, err = a.loop(lctx, trigger, task, start, b)
+		if err != nil && lctx.Err() != nil {
+			err = context.Cause(lctx) // the model's call says only "context deadline exceeded"
+		}
+		cancel()
 	}
 	// The log takes over counting the run's spending, in one step, so a
 	// run starting meanwhile counts it once.
@@ -197,7 +215,11 @@ func (a *Agent) loop(ctx context.Context, trigger, task string, start time.Time,
 		}
 		for _, c := range reply.ToolCalls {
 			res.ToolCalls = append(res.ToolCalls, c.Function.Name)
-			msgs = append(msgs, message{Role: "tool", ToolCallID: c.ID, Content: a.call(ctx, c)})
+			out, err := within(ctx, func() (string, error) { return a.call(ctx, c), nil })
+			if err != nil {
+				return res, err
+			}
+			msgs = append(msgs, message{Role: "tool", ToolCallID: c.ID, Content: out})
 		}
 	}
 	return res, ErrStepLimit
@@ -298,7 +320,8 @@ func (a *Agent) failure(res Result, err error) string {
 	switch {
 	case res.Steps == 0:
 		return fmt.Sprintf("%s didn't run: %v", a.name, err)
-	case errors.Is(err, ErrCostLimit), errors.Is(err, ErrDailyLimit), errors.Is(err, ErrStepLimit):
+	case errors.Is(err, ErrCostLimit), errors.Is(err, ErrDailyLimit), errors.Is(err, ErrStepLimit),
+		errors.Is(err, ErrTimeLimit):
 		return fmt.Sprintf("%s stopped after %s: %v", a.name, steps(res.Steps), err)
 	}
 	return fmt.Sprintf("%s failed after %s: %v", a.name, steps(res.Steps), err)

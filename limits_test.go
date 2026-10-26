@@ -110,6 +110,33 @@ func TestDailyLimitCountsTodaysLog(t *testing.T) {
 	}
 }
 
+func TestSpentOnReadsTheLogFromItsEnd(t *testing.T) {
+	defer func(w int64) { spentWindow = w }(spentWindow)
+	spentWindow = 100 // a line or so, so the window grows
+
+	a := New("t", jobLog(t))
+	day := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	midnight := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
+	for i := range 50 {
+		appendLog(t, a, midnight.AddDate(0, 0, -2).Add(time.Duration(i)*time.Minute), 1)
+	}
+	appendLog(t, a, midnight.Add(time.Hour), 0.25)
+	appendLog(t, a, midnight.Add(2*time.Hour), 0.25)
+	// A run that started yesterday and ended today is logged after today's.
+	line, _ := json.Marshal(record{Start: midnight.Add(-time.Minute), Took: "3h0m0s", Cost: 7})
+	f, _ := os.OpenFile(a.logPath, os.O_WRONLY|os.O_APPEND, 0)
+	f.Write(append(line, '\n'))
+	f.Close()
+	appendLog(t, a, midnight.Add(3*time.Hour), 0.25)
+
+	if got := a.spentOn(day); got != 0.75 {
+		t.Errorf("spent %v, want 0.75", got)
+	}
+	if got := a.spentOn(day.AddDate(0, 0, -2)); got != 50 {
+		t.Errorf("spent two days ago %v, want 50", got)
+	}
+}
+
 func TestDailyLimitStopsARun(t *testing.T) {
 	_, m := newFake(t, callReply("c1", "add", `{}`), callReply("c2", "add", `{}`), textReply("late"))
 	a := New("t", m, dear, MaxCost(1, 0.3), Tool("add", "", add))

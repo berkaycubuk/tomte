@@ -22,6 +22,9 @@ type Message struct {
 	To    string
 }
 
+// Channel is where an agent's results go, given with SendTo. Name says
+// what it is in logs; Send delivers one message, and should give up when
+// ctx is done.
 type Channel interface {
 	Name() string
 	Send(ctx context.Context, m Message) error

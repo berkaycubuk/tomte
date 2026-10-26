@@ -27,6 +27,7 @@ type schemaArgs struct {
 	Tree    *schemaNode        `json:"tree,omitempty"`
 	Any     any                `json:"any,omitempty"`
 	Skipped string             `json:"-"`
+	//lint:ignore U1000 here to show unexported fields are left out
 	private string
 }
 

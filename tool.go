@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"unicode/utf8"
 )
 
 // maxResult caps what one tool call adds to the conversation, so a tool
@@ -77,5 +78,18 @@ func truncate(s string) string {
 	if len(s) <= maxResult {
 		return s
 	}
-	return s[:maxResult] + fmt.Sprintf("\n[cut off: %d more bytes]", len(s)-maxResult)
+	head := headBytes(s, maxResult)
+	return head + fmt.Sprintf("\n[cut off: %d more bytes]", len(s)-len(head))
+}
+
+// headBytes is at most the first n bytes of s, without cutting a
+// character in half.
+func headBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

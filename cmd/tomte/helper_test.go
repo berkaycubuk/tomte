@@ -32,9 +32,16 @@ func newFakeBox(t *testing.T) *fakeBox {
 
 	bin := filepath.Join(dir, "bin")
 	stubs := map[string]string{
-		// systemd-run [options] <command>: note the options, run the command.
+		// systemd-run [options] <command>: note the options, load the env
+		// file, run the command.
 		"systemd-run": `echo "systemd-run $*" >>"$CALLS"
-while [ $# -gt 0 ]; do case $1 in /*) break ;; esac; shift; done
+while [ $# -gt 0 ]; do
+	case $1 in
+	/*) break ;;
+	EnvironmentFile=-*) f=${1#EnvironmentFile=-}; if [ -e "$f" ]; then set -a; . "$f"; set +a; fi ;;
+	esac
+	shift
+done
 exec "$@"`,
 		"systemctl": `echo "systemctl $*" >>"$CALLS"
 case $1 in
@@ -43,7 +50,8 @@ is-active) [ ! -e "$DIR/failing" ] ;;
 esac`,
 		"journalctl": `echo "journalctl $*" >>"$CALLS"; echo "it broke"`,
 		"sleep":      `:`,
-		"date":       `case $1 in +%s) echo 4600 ;; +%F) echo 2026-10-24 ;; esac`,
+		// It's past midnight in Tokyo.
+		"date": `case $1 in +%s) echo 4600 ;; +%F) if [ "${TZ-}" = Asia/Tokyo ]; then echo 2026-10-25; else echo 2026-10-24; fi ;; esac`,
 	}
 	for name, body := range stubs {
 		b.write(filepath.Join(bin, name), "#!/bin/sh\n"+body+"\n", 0o755)
@@ -117,6 +125,10 @@ func TestHelperDeploys(t *testing.T) {
 	}
 	if c := b.calls(); !strings.Contains(c, "systemctl enable --quiet tomte@digest") || !strings.Contains(c, "systemctl restart tomte@digest") {
 		t.Errorf("calls:\n%s", c)
+	}
+	// A binary describing itself mustn't hang the deploy.
+	if c := b.calls(); !strings.Contains(c, "systemd-run --quiet --wait --pipe --collect -p RuntimeMaxSec=30 -p MemoryMax=128M") {
+		t.Errorf("describe has no limits:\n%s", c)
 	}
 
 	// A second deploy keeps the first binary to go back to.
@@ -261,17 +273,57 @@ func TestHelperLogsAndRuns(t *testing.T) {
 	}
 }
 
+// An agent's runs are logged in its own time zone, and so is its today.
+func TestHelperListsTodayInTheAgentsTimeZone(t *testing.T) {
+	b := deployed(t, "digest")
+	b.run("TZ=Asia/Tokyo\n", "env", "digest")
+	b.write(filepath.Join(b.state, "digest", "digest.jsonl"),
+		`{"start":"2026-10-24T23:00:00+09:00","cost":0.5}`+"\n"+
+			`{"start":"2026-10-25T08:00:00+09:00","cost":0.01}`+"\n", 0o600)
+	out, err := b.run("", "ls")
+	if err != nil {
+		t.Fatalf("ls: %v\n%s", err, out)
+	}
+	_, agents, err := parseList(strings.NewReader(out))
+	if err != nil || len(agents) != 1 || len(agents[0].today) != 1 || agents[0].today[0].Cost != 0.01 {
+		t.Errorf("agents %+v, %v\n%s", agents, err, out)
+	}
+}
+
+// The agent writes its state directory, so a run log there may be a
+// symlink to anything; root mustn't be the one reading it.
+func TestHelperReadsRunLogsAsTheAgent(t *testing.T) {
+	b := deployed(t, "digest")
+	b.write(filepath.Join(b.state, "digest", "digest.jsonl"), `{"start":"2026-10-24T08:00:00Z"}`+"\n", 0o600)
+	asAgent := "-p DynamicUser=yes -p User=tomte-digest -p StateDirectory=tomte/digest -p PrivateNetwork=yes"
+	for _, args := range [][]string{{"runs", "digest", "1"}, {"ls"}} {
+		os.Remove(filepath.Join(b.dir, "calls"))
+		if out, err := b.run("", args...); err != nil || !strings.Contains(out, "08:00:00") {
+			t.Errorf("%s: %v %q", args[0], err, out)
+		}
+		if c := b.calls(); !strings.Contains(c, asAgent) {
+			t.Errorf("%s didn't read the log as the agent:\n%s", args[0], c)
+		}
+	}
+}
+
 func TestHelperRun(t *testing.T) {
 	b := deployed(t, "digest")
 	out, err := b.run("", "run", "digest", "send it; now")
 	if err != nil || out != "did: send it; now\n" {
 		t.Fatalf("run: %v %q", err, out)
 	}
-	// As the agent's own user, so its run log stays its own, and within
-	// the unit's limits.
+	// As the agent's own user, so its run log stays its own, and with
+	// every setting the unit sandboxes and limits the agent with.
 	c := b.calls()
-	for _, want := range []string{"User=tomte-digest", "StateDirectory=tomte/digest", "Slice=tomte.slice", "MemoryMax=128M", "ProtectSystem=strict"} {
-		if !strings.Contains(c, want) {
+	_, sandbox, _ := strings.Cut(unitFile, "DynamicUser=yes")
+	sandbox, _, _ = strings.Cut(sandbox, "[Install]")
+	for line := range strings.Lines("DynamicUser=yes" + sandbox) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if want := "-p " + strings.ReplaceAll(line, "%i", "digest"); !strings.Contains(c, want) {
 			t.Errorf("run without %s:\n%s", want, c)
 		}
 	}

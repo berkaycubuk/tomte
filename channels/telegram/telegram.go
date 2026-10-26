@@ -31,6 +31,8 @@ import (
 	"github.com/berkaycubuk/tomte"
 )
 
+// Channel sends to a Telegram chat through a bot, and takes commands
+// from it.
 type Channel struct {
 	token, chat string
 	public      bool
@@ -38,6 +40,9 @@ type Channel struct {
 	http        *http.Client
 }
 
+// New is a channel to chat, a chat id or "@channelname", through the bot
+// with token, from @BotFather. A message with To set goes to that chat
+// instead; with To always set, chat may be "" on a Public bot.
 func New(token, chat string) *Channel {
 	return &Channel{token: token, chat: chat, api: "https://api.telegram.org", http: &http.Client{Timeout: 30 * time.Second}}
 }
