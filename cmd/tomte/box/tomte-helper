@@ -249,7 +249,9 @@ list() {
 	for d in "$root"/*/; do
 		[ -d "$d" ] || continue
 		n=$(basename "$d")
-		valid_name "$n" && [ -x "$d$n" ] || continue
+		if ! valid_name "$n" || [ ! -x "$d$n" ]; then
+			continue
+		fi
 		echo "agent $n"
 		systemctl show "tomte@$n" --timestamp=unix \
 			-p ActiveState -p SubState -p MemoryCurrent -p ActiveEnterTimestamp | sed 's/^/show /'
