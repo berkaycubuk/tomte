@@ -32,6 +32,7 @@ type Agent struct {
 	logPath      string
 	journal      bool // reads the system journal
 	schedules    []*schedule
+	commands     []*command
 	now          func() time.Time
 	errs         []error // mistakes in the options, reported by Do and Run
 
@@ -64,6 +65,9 @@ func New(name string, opts ...Option) *Agent {
 	}
 	if (a.maxRun > 0 || a.maxDay > 0) && a.price == nil {
 		a.errs = append(a.errs, errors.New("MaxCost needs the model's price: add tomte.Price(in, out)"))
+	}
+	if len(a.commands) > 0 && len(receivers(a.channel)) == 0 {
+		a.errs = append(a.errs, fmt.Errorf("commands need a channel people can write to, like telegram; %s isn't one", a.channel.Name()))
 	}
 	return a
 }

@@ -93,7 +93,11 @@ func deploy(args []string) error {
 	// Described again with its env file, the agent's next run is in its
 	// own time zone.
 	json.Unmarshal(out.Bytes(), &in)
-	fmt.Printf("%s is running on %s; next run %s\n", in.Name, b, in.next().Format("Mon 2 Jan 15:04 MST"))
+	if len(in.Schedules) == 0 {
+		fmt.Printf("%s is running on %s, answering /%s\n", in.Name, b, strings.Join(in.Commands, ", /"))
+	} else {
+		fmt.Printf("%s is running on %s; next run %s\n", in.Name, b, in.next().Format("Mon 2 Jan 15:04 MST"))
+	}
 	return nil
 }
 
@@ -105,8 +109,8 @@ func (in agentInfo) check() error {
 	if len(in.Errors) > 0 {
 		return fmt.Errorf("%s has mistakes in its options:\n  %s", in.Name, strings.Join(in.Errors, "\n  "))
 	}
-	if len(in.Schedules) == 0 {
-		return fmt.Errorf("%s has no schedule, so it has nothing to do while serving: add tomte.Cron", in.Name)
+	if len(in.Schedules) == 0 && len(in.Commands) == 0 {
+		return fmt.Errorf("%s has no schedule and no command, so it has nothing to do while serving: add tomte.Cron, tomte.Job or tomte.Command", in.Name)
 	}
 	return nil
 }

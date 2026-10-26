@@ -98,10 +98,23 @@ type Channel interface {
 }
 ```
 
-`Message` is markdown text. Receiving messages and asking questions are
-left out of v1; they will be optional interfaces (`Receiver`, `Asker`)
-that a channel implements and the core finds with a type assertion, so
-adding them doesn't break existing channels.
+`Message` is markdown text, with an optional `To` for a recipient other
+than the channel's own. Receiving messages and asking questions were left
+out of v1 as optional interfaces (`Receiver`, `Asker`) that a channel
+implements and the core finds with a type assertion, so adding them
+doesn't break existing channels. `Receiver` came first, for commands:
+
+```go
+type Receiver interface {
+	Channel
+	Receive(ctx context.Context, handle func(Incoming)) error
+}
+```
+
+`tomte.Command(name, description, fn)` answers `/name args` from whoever
+wrote, with Go code and no model, so a public bot can't be made to spend
+money. Answers run beside the schedules, at most eight at a time, and in
+the run log; anything that isn't a command gets the list of them.
 
 An agent picks its channel with `tomte.SendTo(…)`; without one it uses
 `tomte.Stdout()`; given several, it sends each result to all of them. v1
@@ -148,7 +161,8 @@ reads what's in `/srv/tomte`, and there's no inventory to keep in step.
 ## Later
 
 Added when an agent needs them, in roughly this order: receiving messages
-over a channel, approvals before risky tools, webhooks, model fallbacks,
+over a channel (done: commands), handing free text to the model, approvals
+before risky tools, webhooks, model fallbacks,
 resuming a run after a restart, `tomte new`, MCP tools, test helpers,
 and several agents in one process to share memory on very small machines.
 

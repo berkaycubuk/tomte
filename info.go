@@ -19,6 +19,7 @@ type info struct {
 	Channel   string         `json:"channel"`
 	Tools     []string       `json:"tools,omitempty"`
 	Schedules []scheduleInfo `json:"schedules,omitempty"`
+	Commands  []string       `json:"commands,omitempty"`
 	MaxSteps  int            `json:"max_steps"`
 	MaxRun    float64        `json:"max_cost_run,omitempty"`
 	MaxDay    float64        `json:"max_cost_day,omitempty"`
@@ -44,6 +45,9 @@ func (a *Agent) info() info {
 	now := a.now()
 	for _, s := range a.schedules {
 		in.Schedules = append(in.Schedules, scheduleInfo{Spec: s.spec, Task: s.task, Job: s.job != nil, Next: s.next(now)})
+	}
+	for _, c := range a.commands {
+		in.Commands = append(in.Commands, c.name)
 	}
 	for _, err := range a.errs {
 		in.Errors = append(in.Errors, err.Error())

@@ -18,13 +18,21 @@ import (
 const shutdownGrace = 60 * time.Second
 
 func (a *Agent) serve(ctx context.Context) error {
-	if len(a.schedules) == 0 {
-		return errors.New("nothing to serve: add a schedule with tomte.Cron")
+	if len(a.schedules) == 0 && len(a.commands) == 0 {
+		return errors.New("nothing to serve: add a schedule with tomte.Cron or tomte.Job, or a command with tomte.Command")
 	}
 	// Runs get a context of their own, so a stop signal lets them finish.
 	runCtx, cancelRuns := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelRuns()
 	var wg sync.WaitGroup
+	if len(a.commands) > 0 {
+		a.receive(ctx, runCtx, &wg)
+	}
+	if len(a.schedules) == 0 {
+		<-ctx.Done()
+		a.drain(&wg, cancelRuns)
+		return nil
+	}
 	running := make([]bool, len(a.schedules))
 	var mu sync.Mutex
 

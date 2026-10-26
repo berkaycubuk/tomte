@@ -84,7 +84,34 @@ it's stdout if not given, and with several channels each result goes to
 all of them. `channels/telegram` sends to a Telegram chat and
 `channels/telekinesis` to [telekinesis](https://telekinesis.berkay.tools). A
 channel is two methods, `Name()` and `Send(ctx, Message)`, so writing your
-own is short.
+own is short. A `Message` with `To` set goes to that recipient (a Telegram
+chat id) instead of the channel's own, so a job can write to many people.
+
+**Commands.** `tomte.Command(name, description, fn)` with
+`fn func(context.Context, tomte.Request) (string, error)` lets people write
+to the agent while it's serving: `/report example.com` runs the `report`
+command with `Request.Args` set to `example.com` and `Request.From` to the
+sender, and what `fn` returns goes back to them. Commands are Go code, not
+the model, so writing to the agent can't spend anything. Anything else,
+`/help` and `/start` included unless you declare them, gets the list of
+commands. An error is logged and the sender only hears it didn't work.
+Commands are in the run log, with the channel as their trigger, and an
+agent with only commands needs no model and no schedule.
+
+Commands need a channel people can write to; `channels/telegram` is one.
+It takes commands from its own chat only, unless it's made public:
+
+```go
+bot := telegram.New(os.Getenv("TELEGRAM_TOKEN"), "").Public() // anyone who finds the bot
+tomte.New("site-check",
+	tomte.Command("report", "Check a site now", report),
+	tomte.SendTo(bot),
+).Run()
+```
+
+Only one program can read a bot's messages, so an agent with commands needs
+a bot of its own, with no webhook set. A public bot's commands decide for
+themselves, from `Request.From`, what a stranger may do.
 
 **Limits.** Nobody watches a scheduled run, so:
 

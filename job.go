@@ -49,10 +49,10 @@ func (a *Agent) jobs() (names []string) {
 	return names
 }
 
-// needsModel says whether anything but jobs is declared: the model does
-// everything else.
+// needsModel says whether anything but jobs and commands is declared: the
+// model does everything else.
 func (a *Agent) needsModel() bool {
-	if len(a.tools) > 0 || len(a.jobs()) == 0 {
+	if len(a.tools) > 0 || len(a.jobs()) == 0 && len(a.commands) == 0 {
 		return true
 	}
 	for _, s := range a.schedules {

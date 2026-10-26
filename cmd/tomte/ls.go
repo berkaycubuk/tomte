@@ -23,8 +23,9 @@ type agentInfo struct {
 		Task string    `json:"task"`
 		Next time.Time `json:"next"`
 	} `json:"schedules"`
-	MaxDay float64  `json:"max_cost_day"`
-	Errors []string `json:"errors"`
+	Commands []string `json:"commands"`
+	MaxDay   float64  `json:"max_cost_day"`
+	Errors   []string `json:"errors"`
 }
 
 // runRecord is a line of an agent's run log (runlog.go in tomte).

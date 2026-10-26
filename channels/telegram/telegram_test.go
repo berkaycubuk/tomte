@@ -3,12 +3,14 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/berkaycubuk/tomte"
 )
@@ -126,12 +128,116 @@ func TestSendRetries(t *testing.T) {
 func TestErrorsHideTheToken(t *testing.T) {
 	c := New("SECRET-TOKEN", "42")
 	c.api = "http://127.0.0.1:1" // nothing listens
-	_, err := c.post(context.Background(), []byte(`{}`))
+	_, err := c.post(context.Background(), "sendMessage", []byte(`{}`), nil)
 	if err == nil || strings.Contains(err.Error(), "SECRET-TOKEN") || !strings.Contains(err.Error(), "refused") {
 		t.Errorf("err = %v", err)
 	}
 	_, c2 := newTest(t, `400 {"ok":false,"description":"Bad Request: chat not found"}`)
 	if err := c2.Send(context.Background(), tomte.Message{Text: "hi"}); err == nil || !strings.Contains(err.Error(), "chat not found") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// fakePoller answers getUpdates with one scripted batch per call, then
+// with nothing, and keeps the offsets it was asked for.
+type fakePoller struct {
+	mu      sync.Mutex
+	batches []string
+	offsets []float64
+}
+
+func (f *fakePoller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var p map[string]any
+	json.NewDecoder(r.Body).Decode(&p)
+	f.mu.Lock()
+	f.offsets = append(f.offsets, p["offset"].(float64))
+	batch := `[]`
+	if len(f.batches) > 0 {
+		batch, f.batches = f.batches[0], f.batches[1:]
+	}
+	f.mu.Unlock()
+	if batch == "fail" {
+		w.WriteHeader(409)
+		io.WriteString(w, `{"ok":false,"description":"Conflict: terminated by other getUpdates request"}`)
+		return
+	}
+	if batch == `[]` {
+		time.Sleep(20 * time.Millisecond) // a long poll with nothing new
+	}
+	io.WriteString(w, `{"ok":true,"result":`+batch+`}`)
+}
+
+func msg(id int, chat int64, text string) string {
+	return fmt.Sprintf(`{"update_id":%d,"message":{"text":%q,"chat":{"id":%d}}}`, id, text, chat)
+}
+
+func receive(t *testing.T, c *Channel, f *fakePoller, d time.Duration) []tomte.Incoming {
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	c.api = srv.URL
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	var got []tomte.Incoming
+	if err := c.Receive(ctx, func(in tomte.Incoming) { got = append(got, in) }); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestReceiveTakesOnlyItsChat(t *testing.T) {
+	f := &fakePoller{batches: []string{
+		"[" + msg(7, 42, "/report a.com") + "," + msg(8, 99, "/report b.com") + "]",
+		"[" + msg(9, 42, "  ") + `,{"update_id":10}` + "," + msg(11, 42, "hi") + "]",
+	}}
+	got := receive(t, New("TOKEN", "42"), f, 150*time.Millisecond)
+	if len(got) != 2 || got[0] != (tomte.Incoming{From: "42", Text: "/report a.com"}) || got[1].Text != "hi" {
+		t.Errorf("received %+v", got)
+	}
+	// Each poll starts past what was handed over, and the last one, after
+	// the stop, says so to Telegram.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if o := f.offsets; len(o) < 3 || o[0] != 0 || o[1] != 9 || o[2] != 12 || o[len(o)-1] != 12 {
+		t.Errorf("offsets = %v", o)
+	}
+}
+
+func TestReceivePublic(t *testing.T) {
+	f := &fakePoller{batches: []string{"[" + msg(1, 5, "/start") + "," + msg(2, -77, "/help") + "]"}}
+	got := receive(t, New("TOKEN", "").Public(), f, 100*time.Millisecond)
+	if len(got) != 2 || got[0].From != "5" || got[1].From != "-77" {
+		t.Errorf("received %+v", got)
+	}
+}
+
+func TestReceiveRetries(t *testing.T) {
+	f := &fakePoller{batches: []string{"fail", "[" + msg(1, 42, "/x") + "]"}}
+	if testing.Short() {
+		t.Skip("waits 1 s")
+	}
+	got := receive(t, New("TOKEN", "42"), f, 1500*time.Millisecond)
+	if len(got) != 1 || got[0].Text != "/x" {
+		t.Errorf("received %+v", got)
+	}
+}
+
+func TestReceiveNeedsAChat(t *testing.T) {
+	if err := New("TOKEN", "").Receive(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "Public") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestSendTo(t *testing.T) {
+	f, c := newTest(t)
+	if err := c.Send(context.Background(), tomte.Message{Text: "yours", To: "77"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.sent[0]["chat_id"] != "77" || f.sent[0]["text"] != "yours" {
+		t.Errorf("params = %v", f.sent[0])
+	}
+	// A public bot with no chat of its own sends only To someone.
+	c.chat = ""
+	if err := c.Send(context.Background(), tomte.Message{Text: "lost"}); err == nil {
+		t.Error("sent with no chat")
 	}
 }
