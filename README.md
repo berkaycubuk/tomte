@@ -111,7 +111,10 @@ command with `Request.Args` set to `example.com` and `Request.From` to the
 sender, and what `fn` returns goes back to them. Commands are Go code, not
 the model, so writing to the agent can't spend anything. Anything else,
 `/help` and `/start` included unless you declare them, gets the list of
-commands. An error is logged and the sender only hears it didn't work.
+commands. `tomte.HiddenCommand(name, fn)` is one left out of that list,
+for the owner's commands on a public bot; anyone can still send it, so
+`fn` checks who's asking. An error is logged and the sender only hears
+it didn't work.
 Commands are in the run log, with the channel as their trigger, and an
 agent with only commands needs no model and no schedule.
 

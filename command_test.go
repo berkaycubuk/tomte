@@ -60,12 +60,14 @@ func TestCommands(t *testing.T) {
 		{From: "6", Text: "/nope"},
 		{From: "7", Text: "hello"},
 		{From: "8", Text: "/start"},
+		{From: "9", Text: "/secret"},
 	}}
 	a := New("site", jobLog(t), SendTo(ch),
 		Command("/report", "Report on a site", report),
 		Command("quiet", "", quiet),
 		Command("fail", "", fail),
 		Command("boom", "", boom),
+		HiddenCommand("secret", func(context.Context, Request) (string, error) { return "found it", nil }),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -84,6 +86,7 @@ func TestCommands(t *testing.T) {
 		"6": "There's no /nope.\n\n" + help,
 		"7": help,
 		"8": help,
+		"9": "found it", // answered, though help leaves it out
 	}
 	if len(got) != len(want) {
 		t.Errorf("replies = %q", got)
@@ -101,7 +104,7 @@ func TestCommands(t *testing.T) {
 
 	// Commands are logged; help isn't.
 	rs := readLog(t, a)
-	if len(rs) != 5 {
+	if len(rs) != 6 {
 		t.Fatalf("%d runs logged", len(rs))
 	}
 	errs := map[string]string{}

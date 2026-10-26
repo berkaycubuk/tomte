@@ -26,6 +26,7 @@ type Request struct {
 
 type command struct {
 	name, description string
+	hidden            bool // left out of the list of commands
 	fn                func(context.Context, Request) (string, error)
 }
 
@@ -37,8 +38,19 @@ var commandName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 // or NOTHING. An error is logged, and the sender only hears it didn't
 // work: errors are written for whoever runs the agent, not for strangers.
 func Command(name, description string, fn func(context.Context, Request) (string, error)) Option {
+	return declare(command{name: name, description: description, fn: fn})
+}
+
+// HiddenCommand is a Command left out of the list of commands, for one
+// only the agent's owner uses, like /approve on a public bot. Anyone can
+// still send it, so fn checks who's asking.
+func HiddenCommand(name string, fn func(context.Context, Request) (string, error)) Option {
+	return declare(command{name: name, hidden: true, fn: fn})
+}
+
+func declare(c command) Option {
 	return func(a *Agent) {
-		name = strings.TrimPrefix(name, "/")
+		name := strings.TrimPrefix(c.name, "/")
 		if !commandName.MatchString(name) {
 			a.errs = append(a.errs, fmt.Errorf("command %q: use 1 to 32 lowercase letters, digits and _", name))
 			return
@@ -47,7 +59,8 @@ func Command(name, description string, fn func(context.Context, Request) (string
 			a.errs = append(a.errs, fmt.Errorf("command %s is declared twice", name))
 			return
 		}
-		a.commands = append(a.commands, &command{name, strings.TrimSpace(description), fn})
+		c.name, c.description = name, strings.TrimSpace(c.description)
+		a.commands = append(a.commands, &c)
 	}
 }
 
@@ -80,6 +93,9 @@ func (a *Agent) help() string {
 	var b strings.Builder
 	b.WriteString("Commands:")
 	for _, c := range a.commands {
+		if c.hidden {
+			continue
+		}
 		fmt.Fprintf(&b, "\n/%s", c.name)
 		if c.description != "" {
 			b.WriteString(": " + c.description)
