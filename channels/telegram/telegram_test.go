@@ -46,8 +46,9 @@ func TestSplit(t *testing.T) {
 	}
 }
 
-// fakeBot answers sendMessage with the scripted responses and keeps what
-// it was sent.
+// fakeBot answers sendMessage and sendDocument with the scripted
+// responses and keeps what it was sent; a document as its chat_id, its
+// file's name and its contents.
 type fakeBot struct {
 	mu        sync.Mutex
 	responses []string // status code and JSON body, "429 {…}"
@@ -57,12 +58,22 @@ type fakeBot struct {
 func (f *fakeBot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if r.URL.Path != "/botTOKEN/sendMessage" {
+	var p map[string]any
+	switch r.URL.Path {
+	case "/botTOKEN/sendMessage":
+		json.NewDecoder(r.Body).Decode(&p)
+	case "/botTOKEN/sendDocument":
+		file, h, err := r.FormFile("document")
+		if err != nil {
+			http.Error(w, `{"ok":false,"description":"no document"}`, 400)
+			return
+		}
+		data, _ := io.ReadAll(file)
+		p = map[string]any{"chat_id": r.FormValue("chat_id"), "document": h.Filename, "data": string(data)}
+	default:
 		http.Error(w, `{"ok":false,"description":"wrong path"}`, 404)
 		return
 	}
-	var p map[string]any
-	json.NewDecoder(r.Body).Decode(&p)
 	f.sent = append(f.sent, p)
 	resp := `200 {"ok":true,"result":{}}`
 	if len(f.responses) > 0 {
@@ -99,6 +110,28 @@ func TestSend(t *testing.T) {
 	}
 }
 
+func TestSendFiles(t *testing.T) {
+	f, c := newTest(t)
+	m := tomte.Message{Text: "Your report.", To: "7", Files: []tomte.File{{Name: "report.pdf", Data: []byte("%PDF-1.7")}}}
+	if err := c.Send(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.sent) != 2 || f.sent[0]["text"] != "Your report." {
+		t.Fatalf("sent = %v", f.sent)
+	}
+	if d := f.sent[1]; d["chat_id"] != "7" || d["document"] != "report.pdf" || d["data"] != "%PDF-1.7" {
+		t.Errorf("document = %v", d)
+	}
+
+	f, c = newTest(t)
+	if err := c.Send(context.Background(), tomte.Message{Files: m.Files}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.sent) != 1 || f.sent[0]["document"] != "report.pdf" {
+		t.Errorf("a file alone: sent = %v", f.sent)
+	}
+}
+
 func TestSendFallsBackToPlainText(t *testing.T) {
 	f, c := newTest(t, `400 {"ok":false,"description":"Bad Request: can't parse entities"}`)
 	if err := c.Send(context.Background(), tomte.Message{Text: "**odd"}); err != nil {
@@ -128,7 +161,7 @@ func TestSendRetries(t *testing.T) {
 func TestErrorsHideTheToken(t *testing.T) {
 	c := New("SECRET-TOKEN", "42")
 	c.api = "http://127.0.0.1:1" // nothing listens
-	_, err := c.post(context.Background(), "sendMessage", []byte(`{}`), nil)
+	_, err := c.post(context.Background(), "sendMessage", "application/json", []byte(`{}`), nil)
 	if err == nil || strings.Contains(err.Error(), "SECRET-TOKEN") || !strings.Contains(err.Error(), "refused") {
 		t.Errorf("err = %v", err)
 	}

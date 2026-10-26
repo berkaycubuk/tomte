@@ -49,7 +49,7 @@ func (c *Channel) Send(ctx context.Context, m tomte.Message) error {
 	if c.token == "" {
 		return errors.New("telekinesis: no token")
 	}
-	text := strings.TrimSpace(m.Text)
+	text := strings.TrimSpace(m.TextOnly())
 	if len(text) > maxText {
 		text = text[:maxText-len("…")]
 		for !utf8.ValidString(text) {

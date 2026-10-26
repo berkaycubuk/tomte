@@ -15,11 +15,32 @@ import (
 
 // Message is what an agent sends: markdown text, from the named agent.
 // To is who gets it, in the channel's own terms (a Telegram chat id); a
-// channel sends a message without one to its usual recipient.
+// channel sends a message without one to its usual recipient. Files go
+// with the text, after it; a channel that can't carry files says in the
+// text which ones it left out.
 type Message struct {
 	Agent string
 	Text  string
 	To    string
+	Files []File
+}
+
+// File is a document sent with a message, like a report as a PDF. Name is
+// what the recipient sees it as, "report.pdf".
+type File struct {
+	Name string
+	Data []byte
+}
+
+// TextOnly is m's text with a line for each file the channel can't
+// send, so the recipient knows something is missing: what a text-only
+// channel sends.
+func (m Message) TextOnly() string {
+	text := m.Text
+	for _, f := range m.Files {
+		text += fmt.Sprintf("\n(%s isn't attached: this channel takes text only.)", f.Name)
+	}
+	return text
 }
 
 // Channel is where an agent's results go, given with SendTo. Name says
@@ -68,7 +89,7 @@ type writerChannel struct{ w io.Writer }
 func (writerChannel) Name() string { return "stdout" }
 
 func (c writerChannel) Send(_ context.Context, m Message) error {
-	_, err := fmt.Fprintln(c.w, m.Text)
+	_, err := fmt.Fprintln(c.w, m.TextOnly())
 	return err
 }
 

@@ -208,6 +208,17 @@ func TestRunOnceSendsTheReply(t *testing.T) {
 	}
 }
 
+func TestTextChannelsNameTheFilesTheyLeaveOut(t *testing.T) {
+	var out bytes.Buffer
+	m := Message{Text: "Your report.", Files: []File{{Name: "report.pdf", Data: []byte("%PDF")}}}
+	if err := (writerChannel{&out}).Send(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Your report.\n(report.pdf isn't attached: this channel takes text only.)\n"; out.String() != want {
+		t.Errorf("sent %q", out.String())
+	}
+}
+
 type failingChannel struct{}
 
 func (failingChannel) Name() string                        { return "broken" }

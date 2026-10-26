@@ -100,6 +100,9 @@ all of them. `channels/telegram` sends to a Telegram chat and
 a web app with push notifications by Tomte's author. A channel is two
 methods, `Name()` and `Send(ctx, Message)`, so writing your own is short. A `Message` with `To` set goes to that recipient (a Telegram
 chat id) instead of the channel's own, so a job can write to many people.
+A `Message` can carry `Files`, like a report as a PDF: `channels/telegram`
+sends each as a document after the text, and a channel that takes text
+only, like stdout, names the files it left out.
 
 **Commands.** `tomte.Command(name, description, fn)` with
 `fn func(context.Context, tomte.Request) (string, error)` lets people write

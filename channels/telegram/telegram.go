@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,6 +61,7 @@ func (*Channel) Name() string { return "telegram" }
 // Send sends the message as HTML made from its markdown, split under
 // Telegram's 4096 character limit, to the chat it's To or else the
 // channel's own. A part Telegram can't parse is sent again as plain text.
+// Its files follow as documents, each up to Telegram's 50 MB.
 func (c *Channel) Send(ctx context.Context, m tomte.Message) error {
 	chat := c.chat
 	if m.To != "" {
@@ -81,10 +83,15 @@ func (c *Channel) Send(ctx context.Context, m tomte.Message) error {
 			return err
 		}
 	}
+	for _, f := range m.Files {
+		if err := c.sendFile(ctx, chat, f); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// send calls sendMessage, retrying when Telegram is busy or unreachable.
+// send calls sendMessage.
 func (c *Channel) send(ctx context.Context, chat string, params map[string]any) error {
 	params["chat_id"] = chat
 	// Telegram fetches a preview of the first link as soon as a message is
@@ -94,9 +101,31 @@ func (c *Channel) send(ctx context.Context, chat string, params map[string]any) 
 	if err != nil {
 		return err
 	}
+	return c.retry(ctx, "sendMessage", "application/json", body)
+}
+
+// sendFile calls sendDocument, which takes the file as a form upload.
+func (c *Channel) sendFile(ctx context.Context, chat string, f tomte.File) error {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	w.WriteField("chat_id", chat)
+	part, err := w.CreateFormFile("document", f.Name)
+	if err != nil {
+		return err
+	}
+	part.Write(f.Data)
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.retry(ctx, "sendDocument", w.FormDataContentType(), body.Bytes())
+}
+
+// retry calls a Bot API method, again when Telegram is busy or
+// unreachable.
+func (c *Channel) retry(ctx context.Context, method, contentType string, body []byte) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		wait, err := c.post(ctx, "sendMessage", body, nil)
+		wait, err := c.post(ctx, method, contentType, body, nil)
 		if err == nil {
 			return nil
 		}
@@ -117,12 +146,12 @@ func (c *Channel) send(ctx context.Context, chat string, params map[string]any) 
 // unless that's nil. It returns how long to wait before trying again, or
 // -1 when trying again won't help. Errors never contain the URL, which
 // holds the token.
-func (c *Channel) post(ctx context.Context, method string, body []byte, result any) (time.Duration, error) {
+func (c *Channel) post(ctx context.Context, method, contentType string, body []byte, result any) (time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", c.api+"/bot"+c.token+"/"+method, bytes.NewReader(body))
 	if err != nil {
 		return -1, errors.New("telegram: bad request")
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		var uerr interface{ Unwrap() error }
@@ -234,7 +263,7 @@ func (c *Channel) getUpdates(ctx context.Context, offset, timeout int, updates *
 	if updates != nil {
 		result = updates
 	}
-	return c.post(ctx, "getUpdates", body, result)
+	return c.post(ctx, "getUpdates", "application/json", body, result)
 }
 
 // split cuts text into parts of at most max runes, at a line break when
