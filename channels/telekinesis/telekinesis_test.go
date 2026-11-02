@@ -3,6 +3,7 @@ package telekinesis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,5 +99,55 @@ func TestSendGivesUpOnBadToken(t *testing.T) {
 	}
 	if err := New("").Send(context.Background(), tomte.Message{Text: "hi"}); err == nil {
 		t.Error("no error without a token")
+	}
+}
+
+func TestReceive(t *testing.T) {
+	var mu sync.Mutex
+	polls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/api/channels":
+			w.Write([]byte(`{"channels":[],"last":41}`))
+		case r.URL.Path == "/api/messages" && r.URL.Query().Get("after") == "41" && polls == 0:
+			polls++
+			w.Write([]byte(`{"messages":[{"id":42,"from":"human","text":"/sent 3"},{"id":43,"from":"human","text":" "}]}`))
+		case r.URL.Path == "/api/messages" && r.URL.Query().Get("after") == "43":
+			polls++
+			w.Write([]byte(`{"messages":[]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.String(), 400)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := New("tk_TOKEN")
+	c.api = srv.URL
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var got []tomte.Incoming
+	done := make(chan error)
+	go func() {
+		done <- c.Receive(ctx, func(in tomte.Incoming) {
+			got = append(got, in)
+			cancel()
+		})
+	}()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != (tomte.Incoming{From: "human", Text: "/sent 3"}) {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestReceiveStopsOnBadToken(t *testing.T) {
+	_, c := newTest(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }))
+	t.Cleanup(srv.Close)
+	c.api = srv.URL
+	if err := c.Receive(context.Background(), func(tomte.Incoming) {}); !errors.Is(err, errBadToken) {
+		t.Errorf("err = %v", err)
 	}
 }

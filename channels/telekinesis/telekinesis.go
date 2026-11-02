@@ -6,7 +6,8 @@
 //	tomte.SendTo(telekinesis.New(os.Getenv("TK_TOKEN")))
 //
 // The token names the agent, so messages go as they are, without the
-// agent's name in front.
+// agent's name in front. The channel also receives: what the person
+// writes in the agent's conversation reaches its commands.
 package telekinesis
 
 import (
@@ -16,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,6 +80,86 @@ func (c *Channel) Send(ctx context.Context, m tomte.Message) error {
 		}
 	}
 	return lastErr
+}
+
+// pollSeconds is how long one read waits for a message, under the
+// client's timeout.
+const pollSeconds = 25
+
+// Receive long-polls the agent's conversation and hands each message the
+// person writes in it to handle, From "human". It starts from now: what
+// was written while the agent wasn't running isn't answered. A bad token
+// stops it; the server being unreachable is logged and retried until ctx
+// is done.
+func (c *Channel) Receive(ctx context.Context, handle func(tomte.Incoming)) error {
+	if c.token == "" {
+		return errors.New("telekinesis: no token")
+	}
+	after, started, wait := 0, false, time.Second
+	for {
+		var err error
+		if !started {
+			var r struct{ Last int }
+			if err = c.get(ctx, "/api/channels", &r); err == nil {
+				after, started = r.Last, true
+			}
+		} else {
+			var r struct {
+				Messages []struct {
+					ID   int    `json:"id"`
+					From string `json:"from"`
+					Text string `json:"text"`
+				}
+			}
+			if err = c.get(ctx, fmt.Sprintf("/api/messages?after=%d&wait=%d", after, pollSeconds), &r); err == nil {
+				for _, m := range r.Messages {
+					after = max(after, m.ID)
+					if m.From == "human" && strings.TrimSpace(m.Text) != "" {
+						handle(tomte.Incoming{From: "human", Text: m.Text})
+					}
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if errors.Is(err, errBadToken) {
+			return err
+		}
+		if err != nil {
+			log.Printf("%v; trying again in %s", err, wait)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+			}
+			wait = min(2*wait, time.Minute)
+			continue
+		}
+		wait = time.Second
+	}
+}
+
+var errBadToken = errors.New("telekinesis: the token was refused")
+
+func (c *Channel) get(ctx context.Context, path string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.api+path, nil)
+	if err != nil {
+		return fmt.Errorf("telekinesis: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("telekinesis: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return fmt.Errorf("%w: %s", errBadToken, resp.Status)
+	}
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("telekinesis: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	return json.NewDecoder(resp.Body).Decode(v)
 }
 
 // post returns how long to wait before trying again, or -1 when trying

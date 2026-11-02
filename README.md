@@ -119,8 +119,10 @@ it didn't work.
 Commands are in the run log, with the channel as their trigger, and an
 agent with only commands needs no model and no schedule.
 
-Commands need a channel people can write to; `channels/telegram` is one.
-It takes commands from its own chat only, unless it's made public:
+Commands need a channel people can write to: `channels/telegram`, or
+`channels/telekinesis`, which takes what you write in the agent's
+conversation there. Telegram takes commands from its own chat only,
+unless it's made public:
 
 ```go
 bot := telegram.New(os.Getenv("TELEGRAM_TOKEN"), "").Public() // anyone who finds the bot
